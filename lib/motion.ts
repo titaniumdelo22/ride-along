@@ -52,7 +52,7 @@ export class MotionTracker {
         }
       }
       this.lost = best > 40;
-      const moved = (bx !== 0 || by !== 0) && zero - best > 0.5 && best < 30;
+      const moved = (bx !== 0 || by !== 0) && zero - best > 1.2 && best < 30;
       if (moved || this.lost) {
         if (moved) { dx = bx / this.W; dy = by / this.H; }
         this.prev.set(cur); // new keyframe

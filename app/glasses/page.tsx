@@ -152,13 +152,13 @@ export default function GlassesPage() {
       const e = h.get(p.label);
       if (!e) h.set(p.label, { box: p.box, hits: 1, misses: 0 });
       else {
-        const k = 0.6; // move 60% of the way toward the new box each detection
+        const k = 0.75; // most of the way toward the new box; the overlay glides the rest
         e.box = e.box.map((v, i) => v + (p.box[i] - v) * k) as [number, number, number, number];
         e.hits++; e.misses = 0;
       }
     }
     for (const [label, e] of h) {
-      if (!seenNow.has(label)) { e.misses++; if (e.misses > 1) h.delete(label); }
+      if (!seenNow.has(label)) { e.misses++; if (e.misses > 2) h.delete(label); }
     }
     const out: OverlayPart[] = [];
     for (const [label, e] of h) {
