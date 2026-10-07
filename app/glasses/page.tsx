@@ -65,20 +65,24 @@ export default function GlassesPage() {
         video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: false,
       });
+      streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = stream;
       const v = videoRef.current!;
       v.srcObject = stream;
-      await v.play().catch(() => {});
+      await v.play().catch(() => {}); // an interrupted play() is harmless; the stream still shows
       setNeedTap(false);
       setStatus("Looking…");
       return true;
     } catch (e) {
-      console.error(e);
+      console.warn("camera:", (e as Error).name);
       return false;
     }
   }, []);
 
+  const bootRef = useRef(false);
   useEffect(() => {
+    if (bootRef.current) return;
+    bootRef.current = true;
     (async () => {
       if (await startCamera()) return;
       const forcedStill = new URLSearchParams(window.location.search).get("still");
