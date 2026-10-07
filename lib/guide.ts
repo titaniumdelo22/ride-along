@@ -21,11 +21,11 @@ export const MODEL = "claude-opus-5-5";
 export const Step = z.object({
   icon: z.string().describe("ONE emoji that pictures the action, e.g. 🔌 🔧 🔦 🧽 📋 ⚡ 💧 👀"),
   title: z.string().describe("2 to 4 words, e.g. 'Turn off the water'"),
-  instruction: z.string().describe("One or two short spoken sentences telling the learner exactly what to do"),
+  instruction: z.string().describe("ONE short spoken sentence, under 15 simple words, telling them exactly what to do"),
   check: z.string().describe("What the coach must SEE in the camera to know this step is done"),
-  why: z.string().describe("One sentence on why a pro does it this way"),
-  safety: z.string().nullable().describe("A safety warning for this step, or null"),
-  skill: z.string().describe("The trade skill this step trains, 2 to 4 words"),
+  why: z.string().describe("Why, in under 12 simple words"),
+  safety: z.string().nullable().describe("A safety warning in under 12 words, or null"),
+  skill: z.string().describe("The trade skill this step trains, 2 to 3 words"),
 });
 export type Step = z.infer<typeof Step>;
 
@@ -36,16 +36,22 @@ export const Plan = z.object({
     serial: z.string().nullable().describe("Serial number if readable on a label, else null"),
   }),
   trade: z.string().describe("The trade this belongs to, e.g. Plumbing, HVAC, Appliance repair, Electrical"),
-  tools: z.array(z.string()).describe("Tools and supplies needed, short names"),
+  tools: z
+    .array(z.object({ icon: z.string().describe("ONE emoji for the tool"), name: z.string().describe("Short tool name, 1 to 3 words") }))
+    .describe("Every tool and supply needed for this job, in the order they are used"),
   steps: z.array(Step).describe("4 to 8 steps, in order"),
-  intro: z.string().describe("What the coach says first, one or two warm sentences, like a pro on a video call"),
+  intro: z.string().describe("What the coach says first: one warm short sentence, under 15 words"),
 });
 export type Plan = z.infer<typeof Plan>;
+
+/** The quick first answer: what the item is and the gear to grab. Shows in seconds while the steps are still being written. */
+export const Kit = Plan.pick({ product: true, trade: true, tools: true });
+export type Kit = z.infer<typeof Kit>;
 
 export const Watch = z.object({
   see: z.string().describe("One short sentence: what is in the camera right now"),
   stepDone: z.boolean().describe("True only if the camera clearly shows the current step's check is met"),
-  say: z.string().nullable().describe("What to say out loud now (1 or 2 short sentences), or null to stay quiet"),
+  say: z.string().nullable().describe("What to say out loud now: ONE short sentence, under 15 simple words, or null to stay quiet"),
   point: z
     .object({
       x: z.number().describe("0 to 1 from the left edge of the image"),
@@ -63,7 +69,39 @@ export const Watch = z.object({
 });
 export type Watch = z.infer<typeof Watch>;
 
+export const Report = z.object({
+  headline: z.string().describe("Under 12 words, like a work order line, e.g. 'Fixed a warm water cooler by cleaning the dusty coils'"),
+  didWhat: z.string().describe("2 short first-person sentences ('I ...'), under 35 simple words total, they can say to a boss or a friend"),
+  learned: z.array(z.string()).describe("3 takeaways, each under 10 simple words"),
+  teachBack: z.array(z.string()).describe("3 steps to teach this to someone newer, in order, each under 10 simple words"),
+  nextTime: z.string().describe("One tip for next time, under 12 words, based on what happened"),
+});
+export type Report = z.infer<typeof Report>;
+
+export type ReportInput = {
+  plan: Plan;
+  level?: Level;
+  minutes: number;
+  mistakes: string[];
+  questions: string[];
+  redone: string[]; // steps the learner went back to
+};
+
+export type Level = "newbie" | "intermediate" | "advanced";
+
+const LEVEL_PLAN: Record<Level, string> = {
+  newbie: "The learner is a NEWBIE: never done this. Use 6 to 9 small steps, plain words with every trade term explained the first time, extra safety, and nothing assumed.",
+  intermediate: "The learner is INTERMEDIATE: knows basic tools and safety. Use 5 to 7 steps, normal trade words, short explanations.",
+  advanced: "The learner is ADVANCED: a working tech. Use 3 to 5 bigger steps, trade terms, skip basics, focus on diagnosis and the checks a pro would make.",
+};
+const LEVEL_WATCH: Record<Level, string> = {
+  newbie: "NEWBIE: go slow, confirm each small move, explain why, encourage often.",
+  intermediate: "INTERMEDIATE: normal pace, short tips, explain only when they hesitate.",
+  advanced: "ADVANCED: be brief, speak only when it matters (a check they skipped, a mistake, a safety issue), use trade terms.",
+};
+
 export type WatchInput = {
+  level?: Level;
   frame: string | null; // base64 JPEG, no data: prefix
   task: string;
   plan: Plan;
@@ -74,7 +112,7 @@ export type WatchInput = {
 };
 
 const COACH = `You are a patient journeyman with 25 years in the trades, on a live video call with a learner (an apprentice or a new technician). You can see their camera. You teach the way pros teach on the job: short, plain, hands-on, one thing at a time, and you never let them do something unsafe.
-- The learner's hands are busy and they may not read the screen: everything important must be SAID, short and plain. Talk like a person on a call, not a manual. One or two short sentences.
+- The learner's hands are busy and they may not read well: everything important must be SAID, short and plain. Simple everyday words a 12-year-old knows; if you use a trade word, explain it in 3 words. Talk like a person on a call, not a manual. One short sentence at a time.
 - If you can't see what you need, tell them where to move the camera (aim) and say it.
 - Stay quiet when nothing needs saying (say: null). Never repeat yourself.
 - Only mark a step done when the camera clearly shows it.
@@ -95,7 +133,7 @@ function imageBlock(frame: string) {
   return { type: "image" as const, source: { type: "base64" as const, media_type: "image/jpeg" as const, data: frame } };
 }
 
-export async function plan(task: string, frame: string | null): Promise<Plan> {
+export async function plan(task: string, frame: string | null, level: Level = "newbie"): Promise<Plan> {
   if (!haveCredentials()) return MOCK_PLAN;
   const content: Anthropic.ContentBlockParam[] = [];
   if (frame) content.push(imageBlock(frame));
@@ -103,16 +141,39 @@ export async function plan(task: string, frame: string | null): Promise<Plan> {
     type: "text",
     text: `The learner says they are working on: "${task || "the item in the camera"}".
 ${frame ? "The camera frame above may show the item and its label; read the model and serial number if you can." : ""}
-Write the step-by-step plan a journeyman would walk them through, hands-on, in order, with what you'll check on camera for each step.`,
+${LEVEL_PLAN[level]}
+Write the step-by-step plan a journeyman would walk them through, hands-on, in order, with what you'll check on camera for each step, and every tool they need before they start.`,
   });
   const res = await anthropic().messages.parse({
     model: MODEL,
     max_tokens: 4000,
     system: COACH,
-    output_config: { effort: "medium", format: zodOutputFormat(Plan) },
+    output_config: { effort: "low", format: zodOutputFormat(Plan) },
     messages: [{ role: "user", content }],
   });
   if (!res.parsed_output) throw new Error("no plan");
+  return res.parsed_output;
+}
+
+export async function kit(task: string, frame: string | null, level: Level = "newbie"): Promise<Kit> {
+  if (!haveCredentials()) return { product: MOCK_PLAN.product, trade: MOCK_PLAN.trade, tools: MOCK_PLAN.tools };
+  const content: Anthropic.ContentBlockParam[] = [];
+  if (frame) content.push(imageBlock(frame));
+  content.push({
+    type: "text",
+    text: `The learner says they are working on: "${task || "the item in the camera"}".
+${frame ? "The camera frame above may show the item and its label; read the model and serial number if you can." : ""}
+${LEVEL_PLAN[level]}
+Name the item and list every tool and supply they need to grab before they start, in the order they'll use them. Keep it to the real essentials (3 to 8).`,
+  });
+  const res = await anthropic().messages.parse({
+    model: MODEL,
+    max_tokens: 1000,
+    system: COACH,
+    output_config: { effort: "low", format: zodOutputFormat(Kit) },
+    messages: [{ role: "user", content }],
+  });
+  if (!res.parsed_output) throw new Error("no kit");
   return res.parsed_output;
 }
 
@@ -127,6 +188,7 @@ export async function watch(input: WatchInput): Promise<Watch> {
 Current step ${input.current + 1} of ${input.plan.steps.length}: "${step.title}". Instruction: ${step.instruction}
 Done when the camera shows: ${step.check}
 ${step.safety ? `Safety for this step: ${step.safety}` : ""}
+Learner level: ${LEVEL_WATCH[input.level ?? "newbie"]}
 ${input.teach ? "TEACH MODE: when a step finishes, before telling them the next one, ask what they think comes next and why. Praise right answers, correct wrong ones kindly." : ""}
 What you said lately: ${input.recent.length ? input.recent.map((s) => `"${s}"`).join(" ") : "(nothing yet)"}
 ${input.userSaid ? `The learner just said: "${input.userSaid}". Answer them directly.` : "The learner hasn't said anything new."}
@@ -143,12 +205,51 @@ Look at the camera frame and respond.`,
   return res.parsed_output;
 }
 
+export async function summarize(input: ReportInput): Promise<Report> {
+  if (!haveCredentials()) return mockReport(input);
+  const p = input.plan;
+  const text = `The learner (level: ${input.level ?? "newbie"}) just finished this job with you on a video call.
+Item: ${p.product.name}${p.product.model ? `, model ${p.product.model}` : ""}${p.product.serial ? `, serial ${p.product.serial}` : ""}. Trade: ${p.trade}.
+Steps they did: ${p.steps.map((s, i) => `${i + 1}. ${s.title} (${s.skill}): ${s.why}`).join(" ")}
+Time: about ${Math.max(1, Math.round(input.minutes))} minutes.
+Mistakes you caught: ${input.mistakes.length ? input.mistakes.join("; ") : "none"}.
+Questions they asked: ${input.questions.length ? input.questions.join("; ") : "none"}.
+Steps they went back to: ${input.redone.length ? input.redone.join("; ") : "none"}.
+Write their job report: plain words, warm, specific to what happened on THIS job, so they can explain it to others and teach it.`;
+  const res = await anthropic().messages.parse({
+    model: MODEL,
+    max_tokens: 1500,
+    system: COACH,
+    output_config: { effort: "low", format: zodOutputFormat(Report) },
+    messages: [{ role: "user", content: text }],
+  });
+  if (!res.parsed_output) throw new Error("no report");
+  return res.parsed_output;
+}
+
+function mockReport(input: ReportInput): Report {
+  const p = input.plan;
+  return {
+    headline: `Restored cooling on a ${p.product.name} ${p.product.model ?? ""} by cleaning clogged condenser coils`.replace(/\s+/g, " "),
+    didWhat: "I unplugged the cooler, read the data plate, and found the condenser coils on the back caked in dust. I brushed them clean with the tubes, found the cold thermostat on the wiring diagram, and powered it back on with room to breathe.",
+    learned: ["Unplug first: there's 120 volts and a hot tank in there.", "Most no-cool calls are airflow, not refrigerant.", "Brush coils with the tubes, never across them."],
+    teachBack: ["Start with safety: unplug it and wait for the hot tank to cool.", "Read the data plate before you diagnose anything.", "Show them the coils and explain that dust is a blanket on the heat.", "Brush top to bottom with the tubes, then leave a few inches behind it."],
+    nextTime: input.mistakes.length ? "Go with the tubes from the first stroke, slow and light." : "Check the coils every six months so it never gets this bad.",
+  };
+}
+
 // ── Practice mode: a scripted water dispenser filter change ─────────────────
 
 export const MOCK_PLAN: Plan = {
   product: { name: "Clover water cooler", model: "D1", serial: "14123673" },
   trade: "Appliance and refrigeration (HVAC-R)",
-  tools: ["Phone flashlight", "Soft brush or vacuum with a brush head", "Towel"],
+  tools: [
+    { icon: "🔦", name: "Flashlight" },
+    { icon: "🖌️", name: "Soft coil brush" },
+    { icon: "🧹", name: "Shop vac" },
+    { icon: "🧤", name: "Work gloves" },
+    { icon: "🧻", name: "Towel" },
+  ],
   intro: "Hey, I've got you. I can read the label: Clover D1, 120 volts, R134a refrigerant. When one of these stops getting cold, the first suspect is airflow. Let's check it the safe way.",
   steps: [
     { icon: "🔌", title: "Unplug the cooler", instruction: "Pull the plug out of the wall before you touch anything behind it.", check: "The plug is out of the outlet", why: "There's 120 volts to the compressor and a hot tank heater in there.", safety: "Never reach into the back of a plugged-in unit. The hot tank can also burn you.", skill: "Lockout and safety" },

@@ -14,8 +14,21 @@ Every line of code was written by AI (Claude Code, Claude Opus 5.5). Titanium di
 2. Claude proposed: the coach points at parts on screen, checks each step on camera before moving on, Teach mode (asks what comes next before telling), a safety watch, label reading, a skills log with TradesQuest XP. Titanium: build it.
 3. "This is the machine I'm using for the demo, it's a water machine" (photos of a Clover D1 water cooler: label, wiring diagram, dusty condenser coils). Claude rewrote the practice script around the real unit: a no-cool check and condenser coil cleaning.
 
+4. "I need visual and audio feedback so the tradesman doesn't have to read a lot, maybe highlight parts." Claude made everything important spoken, added a pulsing ring and label on the part, camera-aim arrows, and color flashes with sounds for good, mistake and danger.
+5. "Make it more visual and aesthetic and extremely fun to use. It should make DIY almost addicting, like a game." Claude added missions, XP, levels (Apprentice to Master), combos, badges, confetti, a level-up screen, and a 3-star job card.
+6. "It also needs to tell us the tools we need, and a ranking before people start (newbie, intermediate, advanced) so the AI can move at the speed of the user's education level." Claude added the level picker, a Loadout screen of tool cards to check off, and level-specific instructions for both the plan and the live coaching.
+7. "We need a go back to the last step, and a summary at the end so they can summarize what they did to others and use it to train." Claude added a back button and tap-any-step on the mission map, and an AI job report (what I did, what I learned, how to teach it, next time) that can be shared or read aloud and is saved to a logbook.
+8. "A lot of people don't even know what they're looking at. Something that can help them identify it. For HVAC I wouldn't know the first place to start, or if my car engine blew." Claude added "What am I looking at?": it freezes the frame, labels the parts on it, says what it is, flags licensed-pro jobs, and gives where to start with a one-tap mission.
+9. "It also has to identify what tools we need. Don't make the responses too wordy, this should be easy enough for high school dropouts." Claude added a "You'll need" tools row to identify and capped every AI answer at one short sentence in everyday words.
+10. Speed: Claude split planning into a fast gear-list call (about 5 seconds) and a steps call that runs while the learner gears up, and writes the steps ahead while they read the identify screen, so "Fix it with Ray" opens in under a second.
+
+Tagline (Titanium): "Making DIY fun. Basically turning everyone into a tradesman."
+
 ## How it works
-- `lib/guide.ts`: two Claude calls with structured JSON output.
+- `lib/identify.ts`: "What am I looking at?" One camera frame in; the item, its parts pinned on the image (x, y), the tools to grab, the first 3 checks, a licensed-pro warning when it applies, and 1 or 2 safe missions out.
+- `lib/guide.ts`: the coach, all with structured JSON output.
+  - kit(): the item and the gear list, fast, so the Loadout screen shows in seconds.
+  - summarize(): the end-of-job report from what actually happened (mistakes caught, questions asked, steps redone).
   - plan(): reads the task and the camera frame (model and serial from the data plate), returns the steps, each with what the coach must SEE to call it done, the why, a safety note, and the skill it trains.
   - watch(): every 2.5 seconds (and whenever the learner asks a question), the newest camera frame plus the current step: is it done, should the coach say something, where to point (x, y on the image), any safety issue, any mistake.
 - `app/call/page.tsx`: the call screen. Live camera, the pro in a FaceTime-style bubble, spoken guidance with captions, a pulsing ring on the part being discussed, the step and progress, push-to-talk questions, a safety banner, and the end-of-job skills log.

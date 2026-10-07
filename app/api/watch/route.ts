@@ -6,6 +6,7 @@ export async function POST(req: Request) {
   try {
     const body = (await req.json()) as WatchInput;
     const w = await watch({
+      level: body.level === "advanced" || body.level === "intermediate" ? body.level : "newbie",
       frame: body.frame ?? null,
       task: String(body.task ?? "").slice(0, 300),
       plan: body.plan,
