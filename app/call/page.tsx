@@ -232,6 +232,8 @@ export default function CallPage() {
   const [showAll, setShowAll] = useState(false); // one ring on the most important thing; the rest only when asked
   const [foundMode, setFoundMode] = useState<"what" | "parts">("what");
   const [looking, setLooking] = useState(false);
+  const [lookStage, setLookStage] = useState<"hold" | "thinking">("hold"); // hold still for the shot, then Ray thinks
+  const [lookT, setLookT] = useState(0); // seconds since the shot, for the progress line
   const [snap, setSnap] = useState<{ src: string; w: number; h: number } | null>(null);
   const [live, setLive] = useState(false);
   const [current, setCurrent] = useState(0);
@@ -628,7 +630,14 @@ export default function CallPage() {
         window.speechSynthesis?.speak(new SpeechSynthesisUtterance(" "));
         tone(1, 0, 0.01, "sine", 0.0001);
       } catch {}
+      // Hold still for one beat (a ring fills), then the shutter: after that they can relax.
+      setLookStage("hold");
+      await new Promise((r) => setTimeout(r, 1100));
       const frame = capture();
+      cue("coin");
+      setFlash("good");
+      setLookStage("thinking");
+      setLookT(0);
       setSnap(frame && canvasRef.current ? { src: `data:image/jpeg;base64,${frame}`, w: canvasRef.current.width, h: canvasRef.current.height } : null);
       // The mission presets aren't a description of what's in front of them; only send what they typed or said.
       const said = problem ?? (MISSIONS.some((m) => m.task === task) ? "" : task);
@@ -1038,6 +1047,11 @@ export default function CallPage() {
     return () => document.removeEventListener("pointerdown", onTap, true);
   }, [startEar]);
   useEffect(() => () => stopEar(), [stopEar]);
+  useEffect(() => {
+    if (!looking || lookStage !== "thinking") return;
+    const id = setInterval(() => setLookT((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [looking, lookStage]);
   useEffect(() => {
     if (!curveball) return;
     const id = setTimeout(() => setCurveball(null), 6000);
@@ -1482,12 +1496,32 @@ export default function CallPage() {
       )}
 
       {/* IDENTIFY: labels on the parts, where to start */}
-      {phase === "identify" && looking && (
+      {phase === "identify" && looking && lookStage === "hold" && (
+        <div className="pointer-events-none absolute inset-0 grid place-items-center">
+          <div className="relative grid h-44 w-44 place-items-center">
+            <svg viewBox="0 0 100 100" className="absolute inset-0 -rotate-90">
+              <circle cx="50" cy="50" r="46" fill="none" stroke="rgba(242,237,228,.25)" strokeWidth="6" />
+              <circle cx="50" cy="50" r="46" fill="none" stroke="#FF5F00" strokeWidth="6" strokeDasharray="289" strokeDashoffset="289" className="animate-[fillring_1.1s_linear_forwards]" />
+            </svg>
+            <div className="text-center">
+              <div className="font-display text-4xl uppercase leading-none">Hold still</div>
+              <div className="mt-1 font-mono text-[11px] uppercase tracking-[0.2em] text-bone/70">Whole thing in frame</div>
+            </div>
+          </div>
+        </div>
+      )}
+      {phase === "identify" && looking && lookStage === "thinking" && (
         <>
-          <div className="pointer-events-none absolute inset-x-6 h-1 animate-[scan_2.4s_ease-in-out_infinite] rounded-full bg-[#FF6B1A] shadow-[0_0_30px_8px_rgba(255,107,26,.6)]" />
-          <div className="absolute inset-x-0 bottom-0 p-6 pb-12 text-center">
-            <div className="font-display text-4xl uppercase">Ray is taking a look…</div>
-            <div className="mt-1 text-white/70">Hold steady on the whole thing</div>
+          <div className="pointer-events-none absolute inset-x-6 h-1 animate-[scan_2.4s_ease-in-out_infinite] rounded-full bg-hazard shadow-[0_0_30px_8px_rgba(255,95,0,.55)]" />
+          <div className="absolute inset-x-0 bottom-0 bg-ink/90 p-6 pb-10">
+            <div className="font-mono text-[11px] font-bold uppercase tracking-[0.2em] text-[#22C55E]">✓ Got the shot. You can relax.</div>
+            <div className="mt-2 font-display text-4xl uppercase leading-none">
+              {lookT < 3 ? "Looking at it…" : lookT < 6 ? "Naming the parts…" : lookT < 10 ? "Finding where to start…" : "Almost there…"}
+            </div>
+            <div className="mt-4 h-1.5 w-full bg-bone/15">
+              <div className="h-full bg-hazard transition-[width] duration-1000 ease-linear" style={{ width: `${Math.min(95, (lookT / 12) * 100)}%` }} />
+            </div>
+            <div className="mt-2 font-mono text-[11px] uppercase tracking-[0.15em] text-bone/50">About {Math.max(1, 12 - lookT)} sec</div>
           </div>
         </>
       )}
@@ -1536,6 +1570,9 @@ export default function CallPage() {
                 <div>
                   {foundMode === "parts" && <div className="mb-1 text-xs font-mono font-bold uppercase tracking-[0.25em] text-[#FFB38A]">🔩 Your parts</div>}
                   <h1 className="font-display text-4xl uppercase leading-[0.95]">{found.name}</h1>
+                  {found.state && (
+                    <div className="mt-2 inline-flex items-center gap-2 bg-hazard px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-[0.12em] text-ink">⚠ {found.state}</div>
+                  )}
                   <p className="mt-1.5 text-white/70">{found.what}</p>
                   {found.focus && (
                     <p className="mt-3 text-lg font-extrabold leading-snug">

@@ -75,3 +75,6 @@ body {
   from { transform: scaleY(0.25); }
   to { transform: scaleY(1.25); }
 }
+@keyframes fillring {
+  to { stroke-dashoffset: 0; }
+}
