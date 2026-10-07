@@ -53,6 +53,7 @@ function said(raw: string, phrases: string[]): boolean {
 // Live, like FaceTime: a fresh look every 1.5 s, up to 2 in flight at once (each takes a few seconds round trip).
 const WATCH_EVERY_MS = 1500;
 // What Ray says the instant he hears a question, so there's no dead air while he looks.
+const REBUILD = "Help me put this back together the way it was in my before photos.";
 const FILLERS = ["Okay, let me look.", "Got it. One sec.", "Mm, let me see.", "Okay, show me.", "Alright, let me look at that."];
 const MAX_LOOKS = 2;
 const ORANGE = "#FF6B1A";
@@ -227,6 +228,7 @@ export default function CallPage() {
   const [jobBefores, setJobBefores] = useState<string[]>([]);
   const [zoom, setZoom] = useState<string | null>(null);
   const [found, setFound] = useState<Identify | null>(null);
+  const [foundMode, setFoundMode] = useState<"what" | "parts">("what");
   const [looking, setLooking] = useState(false);
   const [snap, setSnap] = useState<{ src: string; w: number; h: number } | null>(null);
   const [live, setLive] = useState(false);
@@ -605,10 +607,11 @@ export default function CallPage() {
 
   // ── "What am I looking at?" ───────────────────────────────────────────────
   const lookAt = useCallback(
-    async (problem?: string) => {
+    async (problem?: string, mode: "what" | "parts" = "what") => {
       setError(null);
       setPhase("identify");
       setFound(null);
+      setFoundMode(mode);
       setLooking(true);
       try {
         window.speechSynthesis?.speak(new SpeechSynthesisUtterance(" "));
@@ -619,26 +622,33 @@ export default function CallPage() {
       // The mission presets aren't a description of what's in front of them; only send what they typed or said.
       const said = problem ?? (MISSIONS.some((m) => m.task === task) ? "" : task);
       try {
-        const res = await fetch("/api/identify", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ frame, problem: said, level }) });
+        const res = await fetch("/api/identify", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ frame, problem: said, level, mode, befores: mode === "parts" ? befores : [] }),
+        });
         const d = (await res.json()) as { result?: Identify; live?: boolean; error?: string };
         if (!d.result) throw new Error(d.error ?? "no result");
         setFound(d.result);
         setLive(d.live !== false);
         speak(d.result.say);
+        // Write the steps ahead while they read: the rebuild (with their before photos) after a parts check.
+        const rebuild = mode === "parts" && befores.length > 0;
         const m = d.result.missions[0];
-        if (m) {
-          const steps = fetch("/api/plan", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ task: m.task, level, frame }) }).then((r) => r.json());
+        const next = rebuild ? REBUILD : m?.task;
+        if (next) {
+          const steps = fetch("/api/plan", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ task: next, level, frame, befores: rebuild ? befores : [] }) }).then((r) => r.json());
           steps.catch(() => {});
-          aheadRef.current = { task: m.task, level, steps };
+          aheadRef.current = { task: next, level, steps };
         }
-        award(15, ["🔍 New machine spotted"]);
+        award(15, [mode === "parts" ? "🔩 Parts sorted" : "🔍 New machine spotted"]);
       } catch {
         setError("Ray couldn't make that out. Get a little closer and try again.");
       } finally {
         setLooking(false);
       }
     },
-    [capture, task, level, speak, award]
+    [capture, task, level, speak, award, befores]
   );
 
   const retrySteps = useCallback(() => {
@@ -959,11 +969,18 @@ export default function CallPage() {
 
   // From "What is this?" straight into the job, with the gear list it already found.
   const fixIt = useCallback(() => {
-    const m = found?.missions[0];
-    if (!found || !m) return;
+    if (!found) return;
+    const known = { product: { name: found.name, model: null, serial: null }, trade: "", tools: found.tools };
+    // After a parts check with before photos: put it back together from them.
+    if (foundMode === "parts" && befores.length) {
+      setTask(REBUILD);
+      return begin(REBUILD, known, befores);
+    }
+    const m = found.missions[0];
+    if (!m) return;
     setTask(m.task);
-    begin(m.task, { product: { name: found.name, model: null, serial: null }, trade: "", tools: found.tools });
-  }, [found, begin]);
+    begin(m.task, known);
+  }, [found, foundMode, befores, begin]);
 
   // Hands-free is on for every screen after the first tap (the tap is what lets the browser open the mic).
   useEffect(() => {
@@ -1042,6 +1059,7 @@ export default function CallPage() {
           cue("coin");
           return setPage("point");
         }
+        if (page === "point" && /screw|bolt|nut|washer|parts|pieces|which goes/.test(t)) return void lookAt(undefined, "parts");
         if (page === "point" && /what (is|am i|are)|look|identify|scan|no idea|don't know|dont know/.test(t)) return void lookAt();
         if (page === "point" && /i know|pick|list|jobs?$/.test(t)) return setPage("job");
         if (/^(back|go back)$/.test(t.trim())) return setPage(page === "job" ? "point" : "level");
@@ -1328,6 +1346,9 @@ export default function CallPage() {
           <button onClick={() => setPage("job")} className="mt-5 w-full text-center text-lg font-bold text-white/80">
             I know what it is →
           </button>
+          <button onClick={() => lookAt(undefined, "parts")} className="mt-3 w-full text-center text-lg font-bold text-white/80">
+            🔩 Sort my screws and parts
+          </button>
           <button onClick={() => setPage("level")} className="mt-4 w-full text-center text-sm text-white/40">
             {LEVEL_PICKS.find((l) => l.id === level)?.icon} {LEVEL_PICKS.find((l) => l.id === level)?.name} · change
           </button>
@@ -1347,9 +1368,8 @@ export default function CallPage() {
             {befores.length > 0 && (
               <button
                 onClick={() => {
-                  const t = "Help me put this back together the way it was in my before photos.";
-                  setTask(t);
-                  begin(t, undefined, befores);
+                  setTask(REBUILD);
+                  begin(REBUILD, undefined, befores);
                 }}
                 className="flex w-full items-center gap-4 py-4 text-left active:opacity-60"
               >
@@ -1450,6 +1470,7 @@ export default function CallPage() {
             <>
               <div className="flex items-start justify-between gap-3">
                 <div>
+                  {foundMode === "parts" && <div className="mb-1 text-xs font-extrabold uppercase tracking-[0.25em] text-[#FFB38A]">🔩 Your parts</div>}
                   <h1 className="text-3xl font-black leading-none">{found.name}</h1>
                   <p className="mt-1.5 text-white/70">{found.what}</p>
                 </div>
@@ -1472,7 +1493,7 @@ export default function CallPage() {
                   </div>
                 ))}
               </div>
-              <div className="mt-4 text-xs font-extrabold uppercase tracking-[0.2em] text-[#FFB38A]">Start here</div>
+              <div className="mt-4 text-xs font-extrabold uppercase tracking-[0.2em] text-[#FFB38A]">{foundMode === "parts" ? "Putting them back" : "Start here"}</div>
               <ol className="mt-2 space-y-2">
                 {found.start.slice(0, 3).map((x, i) => (
                   <li key={i} className="flex items-center gap-3" onClick={() => speak(`${x.title}. ${x.how}`)}>
@@ -1489,8 +1510,20 @@ export default function CallPage() {
                   onClick={fixIt}
                   className="mt-5 flex h-16 w-full items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#FF8A3D] to-[#FF3D6E] text-xl font-black shadow-[0_10px_40px_rgba(255,107,26,.5)] active:scale-[.98]"
                 >
-                  📞 Fix it with Ray
+                  {foundMode === "parts" ? "🔁 Put it back together" : "📞 Fix it with Ray"}
                 </button>
+              )}
+              {foundMode === "parts" && found.parts.length > 0 && (
+                <ul className="mt-4 space-y-1.5 text-sm">
+                  {found.parts.map((p, i) => (
+                    <li key={i} className="flex gap-2" onClick={() => speak(`${p.label}. ${p.what}`)}>
+                      <span className="grid h-5 w-5 flex-none place-items-center rounded-full bg-[#FF6B1A] text-xs font-black">{i + 1}</span>
+                      <span>
+                        <span className="font-bold">{p.label}</span> <span className="text-white/65">{p.what}</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
               )}
               {handsFree && found.missions[0] && <p className="mt-2 text-center text-xs text-white/45">Or just say “fix it”, or tell Ray what&apos;s wrong</p>}
             </>

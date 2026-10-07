@@ -1,6 +1,6 @@
 # Ride Along: build log
 
-Musa Labs Hackathon, SF Tech Week, Oct 7 2026. Team: Titanium Delo. Built 12:30 to 4:00 PM.
+Musa Labs Hackathon, SF Tech Week, Oct 7 2026. Team: Titanium Delo and Philip Mocanu. Built 12:30 to 4:00 PM.
 Every line of code was written by AI (Claude Code, Claude Opus 5.5). Titanium directed; the model wrote.
 
 ## Tools
@@ -8,6 +8,7 @@ Every line of code was written by AI (Claude Code, Claude Opus 5.5). Titanium di
 - Claude API (claude-opus-5-5) inside the app: plans the job from the camera and the label, then watches the live camera.
 - Next.js 16, React 19, Tailwind, @anthropic-ai/sdk, zod. Browser camera (getUserMedia), browser voice in and out (Web Speech).
 - cloudflared: a secure https link so a phone's camera can use the laptop's server.
+- Gemini (gemini-3.1-flash-lite), Glasses view only (built by Philip): fast boxes around each part, with a small on-phone motion tracker that keeps the labels glued to the parts between detections. See README.md.
 
 ## The prompts that built it (Titanium's words, in order)
 1. "A visual / audio teacher like FaceTiming a pro. We're shown a problem for our use case (a water dispenser) and the AI agent looks at it live with us and visually and audibly walks us through it. For new mechanics, HVAC technicians, plumbers. Scan the serial number. We need a demo in 3 hours."
@@ -29,6 +30,7 @@ Every line of code was written by AI (Claude Code, Claude Opus 5.5). Titanium di
 17. "It should feel like a conversation. I should be able to talk and say 'I tried that, still not working.' And is there any way we can do video like FaceTime?" Claude gave Ray the whole conversation (both sides) on every look, told him never to repeat an instruction that didn't work but give the next likely cause and the next thing to try (adding steps when needed), added an instant spoken "Okay, let me look" so there's no dead air, and gave Ray a FaceTime-style video tile: a cartoon journeyman who talks, blinks and glances toward the part he points at. Claude can't take a live video stream, so the honest answer was: the look and feel of FaceTime, with a fresh frame every 1.5 s. Tested live: "I tried that and it's still not coming out" got "Push the tube down first, then press the collar and pull" plus 3 new steps.
 18. "It should have a truly hands-free option, so I shouldn't have to click the mic every time." Claude made every screen listen after the first tap (including the start pages: say your level, "what is this?", or the job), and if a phone refuses to reopen the mic on its own, one tap anywhere keeps it open for the rest of the call (Ray's own voice is ignored). Room chatter (single words, low-confidence mumbles) is ignored so a crowd can't set Ray off.
 19. "It would be good for everyday DIY tasks too, like mounting a TV." Added "Mount a TV" to the jobs.
+20. "It should be able to identify the different types of screws and pieces, because we unscrewed a bunch for the water thingy." Claude added a parts check: lay everything out, say "what are these screws?" (or tap 🔩), and Ray pins each kind on the photo with its type and where it goes ("Short sheet-metal screw · back panel, 4 of these"), lists the exact bits needed, matches parts to the before photos, and goes straight into putting it back together. Mid-job, "which screw goes here?" works too.
 10. Speed: Claude split planning into a fast gear-list call (about 5 seconds) and a steps call that runs while the learner gears up, and writes the steps ahead while they read the identify screen, so "Fix it with Ray" opens in under a second.
 
 Tagline (Titanium): "Making DIY fun. Basically turning everyone into a tradesman."
