@@ -43,3 +43,5 @@ next-env.d.ts
 # local experiments
 scratch/
 reference/
+# local test images (his photos, not for the repo)
+/public/test/
