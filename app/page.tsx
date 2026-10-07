@@ -14,11 +14,11 @@ export default function Home() {
           Make DIY fun. Turn anyone into a <span className="text-[#FF6B1A]">tradesman.</span>
         </h1>
         <p className="mt-4 text-lg text-white/75">Point your phone at it. Ray, your AI pro, sees what you see and walks you through it out loud.</p>
-        <Link href="/call" className="mt-8 flex h-16 items-center justify-center rounded-full bg-gradient-to-r from-[#FF8A3D] to-[#FF3D6E] text-xl font-black shadow-[0_10px_40px_rgba(255,107,26,.5)]">
-          📞 Call Ray
+        <Link href="/glasses" className="mt-8 flex h-16 items-center justify-center rounded-full bg-gradient-to-r from-[#FF8A3D] to-[#FF3D6E] text-xl font-black shadow-[0_10px_40px_rgba(255,107,26,.5)]">
+          🔍 Scan it
         </Link>
-        <Link href="/glasses" className="mt-3 flex h-14 items-center justify-center rounded-full border border-white/25 text-lg font-bold">
-          Scan the machine
+        <Link href="/call" className="mt-3 flex h-14 items-center justify-center rounded-full border border-white/25 text-lg font-bold">
+          📞 Ask Ray
         </Link>
         <ul className="mt-10 space-y-5 text-lg">
           <li className="flex gap-4"><span className="text-3xl">🔍</span><span><b>What is this?</b> <span className="text-white/65">Ray names it and labels the parts.</span></span></li>
