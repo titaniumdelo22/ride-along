@@ -46,9 +46,18 @@ export const Plan = z.object({
   }),
   trade: z.string().describe("The trade this belongs to, e.g. Plumbing, HVAC, Appliance repair, Electrical"),
   tools: z
-    .array(z.object({ icon: z.string().describe("ONE emoji for the tool"), name: z.string().describe("Short tool name, 1 to 3 words") }))
+    .array(
+      z.object({
+        icon: z.string().describe("ONE emoji for the tool"),
+        name: z.string().describe("Short tool name, 1 to 3 words"),
+        need: z.boolean().describe("true if the job can't be done right or safely without it; false if it only helps"),
+      })
+    )
     .describe("Every tool and supply needed for this job, in the order they are used"),
   steps: z.array(Step).describe("4 to 8 steps, in order"),
+  hazards: z
+    .array(z.object({ icon: z.string().describe("ONE emoji"), text: z.string().describe("The hazard and how to stay safe, under 10 easy words") }))
+    .describe("2 to 4 real hazards on this job (power, hot water, sharp edges, refrigerant lines, heavy or falling things), most serious first"),
   startAt: z
     .number()
     .describe("0-based index of the step to start on. If they're already partway or stuck, the step they're stuck at (or the one quick safety check right before it), never the beginning. If they haven't started, 0."),
@@ -78,6 +87,7 @@ export const Watch = z.object({
     .describe("Which way the learner should move the camera so you can see what you need, or null if the view is fine"),
   safety: z.string().nullable().describe("An urgent safety warning if something unsafe is happening, else null"),
   mistake: z.string().nullable().describe("A mistake the learner just made, in a few words, else null"),
+  drop: z.array(z.string()).describe("Titles of UPCOMING steps the camera shows aren't needed (already done, or not on this unit). Usually empty."),
   surprise: z
     .object({
       what: z.string().describe("The unexpected thing, under 8 words, e.g. 'Water pooling under the unit'"),
@@ -130,6 +140,8 @@ export type WatchInput = {
   recent: string[]; // what the coach said lately, newest last
   talk?: { who: "ray" | "you"; text: string }[]; // the conversation so far, newest last
   surprises?: string[]; // curveballs already handled on this job
+  done?: string[]; // steps already finished
+  missingTools?: string[]; // tools they said they don't have
   ref?: string | null; // a before photo of how this step should end up (putting it back together)
   userSaid: string | null;
 };
@@ -140,7 +152,7 @@ const COACH = `You are a patient journeyman with 25 years in the trades, on a li
 - Stay quiet when nothing needs saying (say: null). Never repeat yourself.
 - Only mark a step done when the camera clearly shows it, or they tell you they already did it.
 - Point at the exact part you mean when it helps.
-- Safety beats speed, always.
+- Safety beats speed, always. Hazards first: live power (120 V), hot water from the hot tank, sharp sheet-metal edges, refrigerant lines (never cut or bend), heavy or falling things, water near a plug. If you see one, use safety to stop them.
 - This is a LIVE call: you get a fresh frame every second or two. Keep "see" under 8 words. When something changes, react like a person on FaceTime with 2 to 6 words ("Yep, that's it." "Little closer." "Good, keep going."), but don't narrate every frame.
 - It's a conversation: remember what they told you and what they already tried, and build on it.
 - If they ask about a screw or small part, say exactly which one (head type, short or long, sheet-metal or machine) and where it goes, and point at it.
@@ -177,7 +189,8 @@ export async function plan(task: string, frame: string | null, level: Level = "n
 ${frame ? "The camera frame above may show the item and its label; read the model and serial number if you can." : ""}
 ${LEVEL_PLAN[level]}
 ${UNIT}
-If it's taken apart (covers off, screws out), this job is putting it back together: inside parts first (tubes, wires, connectors seated), then covers and every screw, then a leak check and a power-on test.
+If it's taken apart (covers off, screws out), this job is putting it back together: inside parts first (tubes, wires, connectors seated), then one step per cover or panel whose check is "every screw hole on it has a screw", then a leak check and a power-on test.
+Mark each tool need true only if the job can't be done right or safely without it. List the real hazards.
 Write the step-by-step plan a journeyman would walk them through, hands-on, in order, with what you'll check on camera for each step, and every tool they need before they start.
 ${befores.length ? `PUTTING IT BACK TOGETHER: the ${befores.length} before photos were taken while it came apart, in order (photo 0 first, before anything was removed). Write the steps to put it back together in reverse, one part at a time, and set each step's photo to the index of the before photo that shows how that part should look. Cover every tube on the right fitting, every screw back in, then a leak check and a power-on test.` : ""}
 They may already be partway through ("I'm stuck at...", or the camera shows it half done). Then don't start over: write the whole job, set startAt to the step they're on or stuck at, and in the intro say where you're picking up. If a safety step before it (power off, water off) isn't clearly done, make the step at startAt ONE quick check that it is, right before the step they're stuck on.`,
@@ -230,7 +243,11 @@ export async function watch(input: WatchInput): Promise<Watch> {
 Current step ${input.current + 1} of ${input.plan.steps.length}: "${step.title}". Instruction: ${step.instruction}
 Done when the camera shows: ${step.check}
 ${step.safety ? `Safety for this step: ${step.safety}` : ""}
+Steps already done: ${input.done?.length ? input.done.join(", ") : "none yet"}.
 Steps after this: ${input.plan.steps.slice(input.current + 1).map((s) => s.title).join(", ") || "none, this is the last one"}.
+${input.missingTools?.length ? `Tools they DON'T have: ${input.missingTools.join(", ")}. Never tell them to use these: give a safe workaround, or if one is truly needed, say so plainly and don't let them do that part without it.` : ""}
+Don't stick to the plan when the camera says otherwise: if an earlier step was missed (an empty screw hole, a loose tube or wire), add a step to fix it now with surprise; if an upcoming step isn't needed, put its exact title in drop.
+Putting things back together: a cover or panel is NOT done until every screw hole on it has a screw. Count them on camera and name the empty one.
 Curveballs already handled: ${input.surprises?.length ? input.surprises.join("; ") : "none"}.
 Learner level: ${LEVEL_WATCH[input.level ?? "newbie"]}
 ${input.teach ? "TEACH MODE: when a step finishes, before telling them the next one, ask what they think comes next and why. Praise right answers, correct wrong ones kindly." : ""}
@@ -289,11 +306,16 @@ export const MOCK_PLAN: Plan = {
   product: { name: "Clover water cooler", model: "D1", serial: "14123673" },
   trade: "Appliance and refrigeration (HVAC-R)",
   tools: [
-    { icon: "🔦", name: "Flashlight" },
-    { icon: "🖌️", name: "Soft coil brush" },
-    { icon: "🧹", name: "Shop vac" },
-    { icon: "🧤", name: "Work gloves" },
-    { icon: "🧻", name: "Towel" },
+    { icon: "🔦", name: "Flashlight", need: true },
+    { icon: "🖌️", name: "Soft coil brush", need: true },
+    { icon: "🧹", name: "Shop vac", need: false },
+    { icon: "🧤", name: "Work gloves", need: true },
+    { icon: "🧻", name: "Towel", need: false },
+  ],
+  hazards: [
+    { icon: "⚡", text: "120 volts inside. Unplug before you touch it." },
+    { icon: "🔥", text: "Hot tank water can burn. Let it cool." },
+    { icon: "🔪", text: "Sheet-metal edges are sharp. Wear gloves." },
   ],
   startAt: 0,
   intro: "Hey, I've got you. I can read the label: Clover D1, 120 volts, R134a refrigerant. When one of these stops getting cold, the first suspect is airflow. Let's check it the safe way.",
@@ -338,7 +360,7 @@ function mockWatch(input: WatchInput): Watch {
   return w;
 }
 
-function mockWatchBase(input: WatchInput): Omit<Watch, "surprise"> & { surprise: null } {
+function mockWatchBase(input: WatchInput): Omit<Watch, "surprise"> & { surprise: null, drop: [] } {
   if (mockStep !== input.current) {
     mockStep = input.current;
     mockTicks = 0;
@@ -347,17 +369,17 @@ function mockWatchBase(input: WatchInput): Omit<Watch, "surprise"> & { surprise:
   const step = input.plan.steps[input.current];
   const point = MOCK_POINTS[input.current] ?? null;
   if (input.userSaid) {
-    return { see: "The learner is asking a question.", stepDone: false, say: `Good question. ${step.why} You're doing fine, take your time.`, point, aim: null, safety: null, mistake: null, surprise: null };
+    return { see: "The learner is asking a question.", stepDone: false, say: `Good question. ${step.why} You're doing fine, take your time.`, point, aim: null, safety: null, mistake: null, surprise: null, drop: [] };
   }
   if (mockTicks === 1 && input.current === 1) {
-    return { see: "The label is too far away to read.", stepDone: false, say: "Get a little closer to that label so I can read it.", point, aim: "closer", safety: null, mistake: null, surprise: null };
+    return { see: "The label is too far away to read.", stepDone: false, say: "Get a little closer to that label so I can read it.", point, aim: "closer", safety: null, mistake: null, surprise: null, drop: [] };
   }
   if (mockTicks === 1 && input.current === 2) {
-    return { see: "Looking at the side of the unit.", stepDone: false, say: "Swing around to the back, where the black coils are.", point: null, aim: "right", safety: null, mistake: null, surprise: null };
+    return { see: "Looking at the side of the unit.", stepDone: false, say: "Swing around to the back, where the black coils are.", point: null, aim: "right", safety: null, mistake: null, surprise: null, drop: [] };
   }
-  if (mockTicks === 1) return { see: "The unit is in view.", stepDone: false, say: null, point, aim: null, safety: null, mistake: null, surprise: null };
+  if (mockTicks === 1) return { see: "The unit is in view.", stepDone: false, say: null, point, aim: null, safety: null, mistake: null, surprise: null, drop: [] };
   if (mockTicks === 2 && input.current === 3) {
-    return { see: "Brushing across the coils.", stepDone: false, say: "Easy, you're brushing across the tubes and packing dust in. Go top to bottom, with the tubes.", point, aim: null, safety: null, mistake: "Brushed across the coils instead of with them", surprise: null };
+    return { see: "Brushing across the coils.", stepDone: false, say: "Easy, you're brushing across the tubes and packing dust in. Go top to bottom, with the tubes.", point, aim: null, safety: null, mistake: "Brushed across the coils instead of with them", surprise: null, drop: [] };
   }
   if (mockTicks >= 4) {
     const next = input.plan.steps[input.current + 1];
@@ -366,7 +388,7 @@ function mockWatchBase(input: WatchInput): Omit<Watch, "surprise"> & { surprise:
         ? `Nice, that's done. What do you think comes next, and why?`
         : `That's it, nice work. Next: ${next.instruction}`
       : "That's the job. Clean coils, good airflow. Give it twenty minutes and that water will be cold.";
-    return { see: "The step is done.", stepDone: true, say, point: next ? MOCK_POINTS[input.current + 1] ?? null : null, aim: null, safety: null, mistake: null, surprise: null };
+    return { see: "The step is done.", stepDone: true, say, point: next ? MOCK_POINTS[input.current + 1] ?? null : null, aim: null, safety: null, mistake: null, surprise: null, drop: [] };
   }
-  return { see: "Working on it.", stepDone: false, say: null, point, aim: null, safety: null, mistake: null, surprise: null };
+  return { see: "Working on it.", stepDone: false, say: null, point, aim: null, safety: null, mistake: null, surprise: null, drop: [] };
 }
