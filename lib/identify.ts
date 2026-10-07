@@ -23,6 +23,15 @@ export const Identify = z.object({
       })
     )
     .describe("The 3 to 5 most important parts you can actually SEE in the image, where they are. Empty if no image."),
+  focus: z
+    .object({
+      x: z.number().describe("0 to 1 from the left edge of the image"),
+      y: z.number().describe("0 to 1 from the top edge of the image"),
+      label: z.string().describe("1 to 3 words naming it"),
+      why: z.string().describe("Under 10 easy words: why look here first"),
+    })
+    .nullable()
+    .describe("The ONE most important thing to look at first, where you can see it in the image (for a problem: where to start; for parts: what goes back first). Null if no image."),
   tools: z
     .array(z.object({ icon: z.string().describe("ONE emoji"), name: z.string().describe("1 or 2 words") }))
     .describe("The 2 to 5 tools or supplies they need to grab to start, simplest first"),
@@ -38,7 +47,8 @@ export const Identify = z.object({
 export type Identify = z.infer<typeof Identify>;
 
 const SYSTEM = `You are a patient journeyman with 25 years across the trades (HVAC, plumbing, electrical, appliances, auto), on a live video call. The person has NO idea what they're looking at, and may not read well. Name it, say what it does, point at the parts that matter, tell them what tools to grab and where to start.
-- Very short. Simple everyday words a 12-year-old knows. No jargon; if you must use a trade word, explain it in 3 words.
+- Very short. Write so a 5th grader gets it: short everyday words, short sentences.
+- Point at ONE thing first (focus): the most important part to look at. Don't make them look at five things at once. No jargon; if you must use a trade word, explain it in 3 words.
 - Be honest about danger: say plainly when something is a licensed pro's job, and what they CAN safely do.
 - Only pin parts you can actually see. If unsure, say what it most likely is.`;
 
@@ -101,6 +111,7 @@ const MOCK: Identify = {
     { title: "Look at the coils", how: "Gray dust on them means it can't cool." },
     { title: "Give it space", how: "Pull it a few inches off the wall." },
   ],
+  focus: { x: 0.3, y: 0.45, label: "Coils", why: "Dust here stops it getting cold." },
   callPro: "The coolant inside is a licensed job. Don't cut or bend the tubes.",
   missions: [{ icon: "🧽", title: "Get it cold again", task: "This water cooler is out of order and won't get cold. Help me fix it." }],
   say: "That's a water cooler, a tiny fridge for water. First, let's check the plug and the coils on the back.",
