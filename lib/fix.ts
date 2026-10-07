@@ -73,13 +73,54 @@ let client: Anthropic | null = null;
 const anthropic = () => (client ??= new Anthropic());
 const img = (frame: string) => ({ type: "image" as const, source: { type: "base64" as const, media_type: "image/jpeg" as const, data: frame } });
 
-export async function planFix(problem: string, frame: string | null): Promise<FixPlan> {
+export const Intake = z.object({
+  observations: z.string().describe("Two or three plain sentences: what the photos so far show that matters for the problem (wires, connectors, parts, anything odd)"),
+  enough: z.boolean().describe("True if you have enough context to diagnose and plan. False if another view would change the plan."),
+  nextShot: z
+    .object({
+      title: z.string().describe("3 to 5 words, e.g. 'Inside, terminal block'"),
+      instruction: z.string().describe("One or two short sentences: exactly where to point the phone and how close, and what you want to see"),
+      parts: z.array(z.string()).describe(`Parts that should be in this shot, ONLY from: ${LABELS.join(", ")}`),
+    })
+    .nullable()
+    .describe("The next photo you need, or null if enough"),
+});
+export type Intake = z.infer<typeof Intake>;
+
+/** Guided intake: given the problem and the photos so far, decide what to look at next. Fast model. */
+export async function intakeNext(problem: string, photos: string[], maxShots: number): Promise<Intake> {
   const content: Anthropic.ContentBlockParam[] = [];
-  if (frame) content.push(img(frame));
+  photos.forEach((f, i) => { content.push({ type: "text", text: `Photo ${i + 1}:` }); content.push(img(f)); });
   content.push({
     type: "text",
     text: `The learner says: "${problem}".
-${frame ? "The camera frame above shows the machine right now; use anything you can see." : ""}
+${photos.length ? `You have ${photos.length} photo(s) above.` : "You have no photos yet. Ask for the first one: a clear overall view of the side of the machine with the problem."}
+You may ask for at most ${maxShots} photos in total. Think like a technician arriving on site: what do you need to SEE to diagnose this? The back cover is already off, so the inside (terminal block, relay, connectors, harness, switch) is reachable with a close shot. Ask for one specific view at a time. When you can diagnose, say enough.`,
+  });
+  const res = await anthropic().messages.parse({
+    model: WATCH_MODEL,
+    max_tokens: 700,
+    system: COACH,
+    output_config: { effort: "low", format: zodOutputFormat(Intake) },
+    messages: [{ role: "user", content }],
+  });
+  if (!res.parsed_output) throw new Error("no intake");
+  const it = res.parsed_output;
+  if (photos.length >= maxShots) { it.enough = true; it.nextShot = null; }
+  if (it.nextShot) it.nextShot.parts = it.nextShot.parts.map((p) => p.toLowerCase().trim()).filter((p) => LABELS.includes(p));
+  return it;
+}
+
+export async function planFix(problem: string, frame: string | null, photos: string[] = [], notes: string[] = []): Promise<FixPlan> {
+  const content: Anthropic.ContentBlockParam[] = [];
+  const all = photos.length ? photos : frame ? [frame] : [];
+  all.forEach((f, i) => { content.push({ type: "text", text: `Photo ${i + 1}:` }); content.push(img(f)); });
+  content.push({
+    type: "text",
+    text: `The learner says: "${problem}".
+${all.length ? `The ${all.length} photo(s) above show the machine right now from the views you asked for. Use everything you can see: individual wires, which screw or tab each one goes to, connectors, switch position, lights.` : ""}
+${notes.length ? `Your notes while gathering photos:
+${notes.map((n) => `- ${n}`).join("\n")}` : ""}
 Diagnose the most likely cause and write the step-by-step repair a journeyman would walk them through. Each step is one physical action with what you will check on camera, and lists the parts involved using only the known part names.`,
   });
   const res = await anthropic().messages.parse({

@@ -4,8 +4,8 @@ import Link from "next/link";
 import GlassesOverlay, { type OverlayPart, type OverlayAnomaly } from "@/components/GlassesOverlay";
 import { PARTS, byLabel } from "@/lib/parts";
 import { MotionTracker } from "@/lib/motion";
-import ScanDrawer, { type Mode } from "@/components/ScanDrawer";
-import type { FixPlan, FixWatch, Replan } from "@/lib/fix";
+import ScanDrawer, { type Mode, type FixPhase } from "@/components/ScanDrawer";
+import type { FixPlan, FixWatch, Replan, Intake } from "@/lib/fix";
 
 /**
  * Glasses view: live camera, every known part tinted in its color and labeled.
@@ -44,6 +44,11 @@ export default function GlassesPage() {
   const [anomalies, setAnomalies] = useState<OverlayAnomaly[]>([]);
   const [looking, setLooking] = useState(false);
   const replannedStep = useRef(-1); // step index we already re-planned from (one re-plan per step)
+  const [fixPhase, setFixPhase] = useState<FixPhase>("idle");
+  const [intake, setIntake] = useState<Intake | null>(null);
+  const photosRef = useRef<string[]>([]);
+  const notesRef = useRef<string[]>([]);
+  const [shots, setShots] = useState(0);
   const [listening, setListening] = useState(false);
   const modeRef = useRef(mode); modeRef.current = mode;
   const planRef = useRef(plan); planRef.current = plan;
@@ -355,24 +360,52 @@ export default function GlassesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [grab]);
 
-  const onPlan = async (problem: string) => {
-    if (!problem) { setPlan(null); setStepIndex(0); setSelected(null); setAnomalies([]); historyRef.current = []; return; }
-    setProblem(problem); historyRef.current = []; setAnomalies([]);
-    setPlanning(true);
-    setErr(null);
-    try {
-      const frame = grab(640, 0.6);
-      const res = await fetch("/api/fix", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: "plan", problem, frame }) });
-      const j = (await res.json()) as FixPlan & { error?: string };
-      if (j.error) throw new Error(j.error);
-      setPlan(j);
-      setStepIndex(0);
-    } catch (e) {
-      setErr("Ray couldn't make a plan: " + String((e as Error).message || e));
-    } finally {
-      setPlanning(false);
-    }
+  const resetFix = () => {
+    setPlan(null); setStepIndex(0); setSelected(null); setAnomalies([]); setIntake(null);
+    historyRef.current = []; photosRef.current = []; notesRef.current = []; setShots(0);
+    setFixPhase("idle");
   };
+  const onStartFix = () => { resetFix(); setFixPhase("problem"); speak("Tell me what's going on with it."); };
+
+  // Step 1: the problem. Ray decides the first shot.
+  const onProblem = async (text: string) => {
+    setProblem(text); setPlanning(true); setErr(null);
+    try {
+      const res = await fetch("/api/fix", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: "intake", problem: text, photos: [] }) });
+      const it = (await res.json()) as Intake & { error?: string };
+      if (it.error) throw new Error(it.error);
+      setIntake(it); setFixPhase("shots");
+      if (it.nextShot) speak(it.nextShot.instruction);
+    } catch (e) { setErr("Ray didn't catch that: " + String((e as Error).message || e)); }
+    finally { setPlanning(false); }
+  };
+
+  // Step 2..n: capture the shot Ray asked for; Ray asks for the next one or says it has enough, then plans.
+  const onCapture = async () => {
+    const frame = grab(1024, 0.8);
+    if (!frame) return;
+    photosRef.current = [...photosRef.current, frame];
+    setShots(photosRef.current.length);
+    setPlanning(true); setErr(null);
+    try {
+      const res = await fetch("/api/fix", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: "intake", problem: problemRef.current, photos: photosRef.current }) });
+      const it = (await res.json()) as Intake & { error?: string };
+      if (it.error) throw new Error(it.error);
+      notesRef.current = [...notesRef.current, it.observations];
+      setIntake(it);
+      if (!it.enough && it.nextShot) { speak(`Got it. ${it.nextShot.instruction}`); return; }
+      setFixPhase("planning");
+      speak("That's enough to work with. Give me about twenty seconds.");
+      const r2 = await fetch("/api/fix", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: "plan", problem: problemRef.current, photos: photosRef.current, notes: notesRef.current }) });
+      const j = (await r2.json()) as FixPlan & { error?: string };
+      if (j.error) throw new Error(j.error);
+      historyRef.current = notesRef.current.map((n) => `Intake: ${n}`).slice(-4);
+      setPlan(j); setStepIndex(0); setFixPhase("steps");
+    } catch (e) { setErr("Ray couldn't continue: " + String((e as Error).message || e)); setFixPhase("shots"); }
+    finally { setPlanning(false); }
+  };
+
+  const onPlan = async (problem: string) => { if (!problem) resetFix(); };
 
   type Recognition = { lang: string; interimResults: boolean; onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null; onend: (() => void) | null; onerror: (() => void) | null; start: () => void; stop: () => void };
   const onMic = () => {
@@ -386,7 +419,7 @@ export default function GlassesPage() {
     r.onresult = (e) => {
       const text = e.results[0][0].transcript;
       if (planRef.current) userSaidRef.current = text; // a question mid-job
-      else onPlan(text); // describing the problem
+      else onProblem(text); // describing the problem
     };
     r.onend = () => setListening(false);
     r.onerror = () => setListening(false);
@@ -402,7 +435,8 @@ export default function GlassesPage() {
 
   // What gets drawn: in Fix mode only the current step's parts; with a selection only that part; otherwise everything.
   const stepParts = mode === "fix" && plan ? new Set(plan.steps[stepIndex]?.parts ?? []) : null;
-  const visibleParts = selected && mode !== "fix" ? parts.filter((p) => p.label === selected) : parts;
+  const intakeOn = mode === "fix" && fixPhase !== "steps" && fixPhase !== "idle";
+  const visibleParts = intakeOn ? [] : selected && mode !== "fix" ? parts.filter((p) => p.label === selected) : parts;
   const inView = new Set(parts.map((p) => p.label));
 
   return (
@@ -429,6 +463,7 @@ export default function GlassesPage() {
       <ScanDrawer mode={mode} setMode={(m) => { setMode(m); if (m !== "tour" && m !== "fix") setSelected(null); if (m === "tour") setSelected(PARTS[tourIndex].label); }}
         seen={seen} inView={inView} selected={selected} onSelect={onTap}
         tourIndex={tourIndex} setTourIndex={setTourIndex}
+        fixPhase={fixPhase} onStartFix={onStartFix} onProblem={onProblem} intake={intake} shots={shots} onCapture={onCapture} busy={planning}
         plan={plan} stepIndex={stepIndex} setStepIndex={setStepIndex} planning={planning} onPlan={onPlan}
         lastSay={lastSay} listening={listening} onMic={onMic} />
 
