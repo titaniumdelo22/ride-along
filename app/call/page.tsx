@@ -176,6 +176,7 @@ export default function CallPage() {
   const questionsRef = useRef<string[]>([]);
   const redoneRef = useRef<string[]>([]);
   const surprisesRef = useRef<string[]>([]);
+  const missingRef = useRef<string[]>([]); // tools they left unchecked on the gear screen
   const shotsRef = useRef<string[]>([]); // photos Ray takes as each step starts, for putting it back together later
   const fileRef = useRef<HTMLInputElement>(null);
   const clearedRef = useRef<Set<number>>(new Set());
@@ -749,10 +750,16 @@ export default function CallPage() {
     const first = capture();
     shotsRef.current = first ? [first] : [];
     setSees(null);
+    // Tools they left unchecked (only if they checked any; no checks means they didn't say).
+    const missing = gear.size ? plan.tools.filter((_, i) => !gear.has(i)) : [];
+    missingRef.current = missing.map((t) => t.name);
+    const mustMissing = missing.filter((t) => t.need).map((t) => t.name);
     setPhase("guiding");
     award(10 * plan.tools.length, ["🎒 Geared up"]);
-    speak(`${plan.intro} ${current > 0 ? `Picking up at step ${current + 1}` : "Step one"}: ${plan.steps[current].instruction}`);
-  }, [plan, current, award, speak, capture]);
+    const safety = plan.hazards?.length ? `Safety first: ${plan.hazards.map((h) => h.text).join(" ")} ` : "";
+    const tools = mustMissing.length ? `Heads up, you'll need ${mustMissing.join(" and ")} for part of this. I'll tell you when. ` : "";
+    speak(`${safety}${tools}${current > 0 ? `Picking up at step ${current + 1}` : "Step one"}: ${plan.steps[current].instruction}`);
+  }, [plan, current, award, speak, capture, gear]);
 
   // ── Watch loop ────────────────────────────────────────────────────────────
   const tick = useCallback(
@@ -770,7 +777,7 @@ export default function CallPage() {
         const res = await fetch("/api/watch", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ frame: capture(512, 0.5), task, level, plan, current: at, teach, recent: recentRef.current, talk: talkRef.current, userSaid, surprises: surprisesRef.current, ref: refPhoto(at) }),
+          body: JSON.stringify({ frame: capture(512, 0.5), task, level, plan, current: at, teach, recent: recentRef.current, talk: talkRef.current, userSaid, surprises: surprisesRef.current, ref: refPhoto(at), done: plan.steps.slice(0, at).map((s) => s.title), missingTools: missingRef.current }),
         });
         const w = (await res.json()) as Watch & { error?: string };
         if (w.error) return;
@@ -808,6 +815,11 @@ export default function CallPage() {
           award(30, ["🚧 Curveball spotted"]);
         }
         // Talk like a person on a call: answer questions right away, otherwise short reactions with a breath between them.
+        // Steps the camera shows aren't needed come off the plan.
+        if (w.drop?.length && sameStep && !detour) {
+          const gone = new Set(w.drop);
+          setPlan((p) => (p ? { ...p, steps: p.steps.filter((s, i) => i <= at || !gone.has(s.title)) } : p));
+        }
         const theyreTalking = !userSaid && Date.now() - voiceAt.current < 2500;
         const rayTalking = !!window.speechSynthesis?.speaking;
         if (w.say && !theyreTalking && (userSaid || (!rayTalking && Date.now() - lastSayAt.current > 2000))) speak(w.say);
@@ -1041,7 +1053,7 @@ export default function CallPage() {
   // From "What is this?" straight into the job, with the gear list it already found.
   const fixIt = useCallback(() => {
     if (!found) return;
-    const known = { product: { name: found.name, model: null, serial: null }, trade: "", tools: found.tools };
+    const known = { product: { name: found.name, model: null, serial: null }, trade: "", tools: found.tools.map((t) => ({ ...t, need: true })) };
     // After a parts check with before photos: put it back together from them.
     if (foundMode === "parts" && befores.length) {
       setTask(REBUILD);
@@ -1750,6 +1762,7 @@ export default function CallPage() {
                 >
                   <div className="text-5xl">{t.icon}</div>
                   <div className="mt-2 text-lg font-extrabold leading-tight">{t.name}</div>
+                  {"need" in t && <div className={`mt-1 font-mono text-[10px] font-bold uppercase tracking-[0.15em] ${t.need ? "text-hazard" : "text-bone/45"}`}>{t.need ? "Must have" : "Optional"}</div>}
                   <div className={`absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-full text-lg font-black ${on ? "bg-[#22C55E]" : "bg-white/15"}`}>{on ? "✓" : ""}</div>
                 </button>
               );
@@ -1759,6 +1772,19 @@ export default function CallPage() {
             {gear.size}/{kit.tools.length} ready
             {handsFree && <div className="mt-1 text-white/45">Say “let&apos;s go” when you&apos;re ready</div>}
           </div>
+          {plan?.hazards?.length ? (
+            <div className="mt-5 border-y border-hazard/40 py-3">
+              <div className="font-mono text-[11px] font-bold uppercase tracking-[0.2em] text-hazard">⚠ Safety on this job</div>
+              <ul className="mt-2 space-y-1.5">
+                {plan.hazards.map((h, i) => (
+                  <li key={i} className="flex gap-2 text-sm font-semibold">
+                    <span>{h.icon}</span>
+                    <span>{h.text}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           {plan ? (
             <button onClick={go} className="mt-5 h-16 w-full animate-[pop_.4s_ease-out] bg-hazard text-ink font-display uppercase tracking-wide text-xl font-black active:scale-[.98]">
               {gear.size >= kit.tools.length ? "Let's go 🚀" : "Start anyway"}

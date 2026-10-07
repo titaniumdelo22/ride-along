@@ -18,6 +18,8 @@ export async function POST(req: Request) {
         : [],
       userSaid: body.userSaid ? String(body.userSaid).slice(0, 400) : null,
       ref: typeof body.ref === "string" && body.ref.length < 600_000 ? body.ref : null,
+      done: Array.isArray(body.done) ? body.done.slice(0, 20).map((x) => String(x).slice(0, 80)) : [],
+      missingTools: Array.isArray(body.missingTools) ? body.missingTools.slice(0, 10).map((x) => String(x).slice(0, 40)) : [],
       surprises: Array.isArray(body.surprises) ? body.surprises.slice(-6).map((x) => String(x).slice(0, 120)) : [],
     });
     return Response.json(w);
