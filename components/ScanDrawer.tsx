@@ -1,7 +1,9 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { PARTS, byLabel } from "@/lib/parts";
-import type { FixPlan } from "@/lib/fix";
+import type { FixPlan, Intake } from "@/lib/fix";
+
+export type FixPhase = "idle" | "problem" | "shots" | "planning" | "steps";
 
 export type Mode = "parts" | "tour" | "fix";
 
@@ -16,6 +18,13 @@ type Props = {
   tourIndex: number;
   setTourIndex: (i: number) => void;
   // fix
+  fixPhase: FixPhase;
+  onStartFix: () => void;
+  onProblem: (problem: string) => void;
+  intake: Intake | null;
+  shots: number;
+  onCapture: () => void;
+  busy: boolean;
   plan: FixPlan | null;
   stepIndex: number;
   setStepIndex: (i: number) => void;
@@ -75,16 +84,24 @@ export default function ScanDrawer(p: Props) {
         </div>
       )}
 
-      {p.mode === "fix" && !p.plan && (
-        <form className="px-3 pb-6" onSubmit={(e) => { e.preventDefault(); if (problem.trim()) p.onPlan(problem.trim()); }}>
-          <div className="text-sm font-bold">What's going on?</div>
+      {p.mode === "fix" && p.fixPhase === "idle" && (
+        <div className="px-3 pb-6">
+          <div className="text-sm text-white/75">Ray will ask what's wrong, then tell you exactly what to show the camera, one shot at a time, before making a plan.</div>
+          <button onClick={p.onStartFix} className="mt-3 w-full rounded-full bg-[#FF6B1A] py-3 text-base font-black text-black">Start a fix</button>
+        </div>
+      )}
+
+      {p.mode === "fix" && p.fixPhase === "problem" && (
+        <form className="px-3 pb-6" onSubmit={(e) => { e.preventDefault(); if (problem.trim()) p.onProblem(problem.trim()); }}>
+          <div className="text-xs text-white/60">Step 1 · Tell Ray</div>
+          <div className="mt-1 text-lg font-bold">What's going on?</div>
           <div className="mt-2 flex gap-2">
             <input ref={inputRef} value={problem} onChange={(e) => setProblem(e.target.value)} placeholder="e.g. the cold light is off and the water is warm"
               className="flex-1 rounded-full bg-white/10 px-4 py-3 text-sm outline-none placeholder:text-white/40" />
             <button type="button" onClick={p.onMic} className={`rounded-full px-4 text-lg ${p.listening ? "bg-red-500" : "bg-white/10"}`}>🎙️</button>
           </div>
-          <button type="submit" disabled={p.planning || !problem.trim()} className="mt-2 w-full rounded-full bg-[#FF6B1A] py-3 text-sm font-bold text-black disabled:opacity-40">
-            {p.planning ? "Ray is looking…" : "Make a plan"}
+          <button type="submit" disabled={p.busy || !problem.trim()} className="mt-2 w-full rounded-full bg-[#FF6B1A] py-3 text-sm font-bold text-black disabled:opacity-40">
+            {p.busy ? "Ray is thinking…" : "Next"}
           </button>
           <div className="mt-2 flex flex-wrap gap-1.5">
             {["Nothing turns on", "COLD light is off, water is warm", "No hot water", "Leaking"].map((q) => (
@@ -94,7 +111,26 @@ export default function ScanDrawer(p: Props) {
         </form>
       )}
 
-      {p.mode === "fix" && p.plan && step && (
+      {p.mode === "fix" && p.fixPhase === "shots" && (
+        <div className="px-3 pb-6">
+          <div className="text-xs text-white/60">Step {p.shots + 2} · Show Ray · photo {p.shots + 1} of up to 4</div>
+          <div className="mt-1 text-lg font-bold">{p.intake?.nextShot?.title ?? "Overall view"}</div>
+          <p className="text-sm text-white/85">{p.intake?.nextShot?.instruction ?? "Point the phone at the side of the machine with the problem, about arm's length away, then tap Capture."}</p>
+          {p.intake?.observations && p.shots > 0 && <p className="mt-1 text-xs text-[#FFB27A]">Ray: {p.intake.observations}</p>}
+          <button onClick={p.onCapture} disabled={p.busy} className="mt-3 w-full rounded-full bg-[#FF6B1A] py-4 text-lg font-black text-black disabled:opacity-40">
+            {p.busy ? "Ray is looking…" : "📸 Capture"}
+          </button>
+        </div>
+      )}
+
+      {p.mode === "fix" && p.fixPhase === "planning" && (
+        <div className="px-3 pb-6">
+          <div className="text-lg font-bold">Ray is working out the fix…</div>
+          <p className="text-sm text-white/75">Reading all {p.shots} photos: wires, connectors, switch, lights. About 20 seconds.</p>
+        </div>
+      )}
+
+      {p.mode === "fix" && p.fixPhase === "steps" && p.plan && step && (
         <div className="px-3 pb-6">
           <div className="flex items-center justify-between text-xs text-white/60">
             <span>Step {p.stepIndex + 1} of {p.plan.steps.length}</span>
