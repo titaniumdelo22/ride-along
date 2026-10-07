@@ -32,7 +32,9 @@ export class MotionTracker {
     for (let i = 0, j = 0; i < d.length; i += 4, j++) cur[j] = (d[i] * 3 + d[i + 1] * 6 + d[i + 2]) / 10;
     let dx = 0, dy = 0;
     if (this.prev) {
-      const R = 6;
+      // Match against a KEYFRAME (the last frame where we accepted a shift), so slow pans that move
+      // less than a thumbnail pixel per frame still add up instead of being thrown away.
+      const R = 8;
       let best = Infinity, bx = 0, by = 0, zero = 0;
       for (let oy = -R; oy <= R; oy++) {
         for (let ox = -R; ox <= R; ox++) {
@@ -49,15 +51,18 @@ export class MotionTracker {
           if (sad < best) { best = sad; bx = ox; by = oy; }
         }
       }
-      // Only trust a clear win over "no motion"; otherwise hold still.
-      if (zero - best > 0.6 && best < 25) { dx = bx / this.W; dy = by / this.H; }
-      this.lost = best > 40; // picture changed too much (fast pan / new scene)
+      this.lost = best > 40;
+      const moved = (bx !== 0 || by !== 0) && zero - best > 0.5 && best < 30;
+      if (moved || this.lost) {
+        if (moved) { dx = bx / this.W; dy = by / this.H; }
+        this.prev.set(cur); // new keyframe
+      }
+    } else {
+      this.prev = new Float32Array(this.W * this.H);
+      this.prev.set(cur);
     }
     this.total.x += dx;
     this.total.y += dy;
-    const t = this.prev ?? new Float32Array(this.W * this.H);
-    t.set(cur);
-    this.prev = t;
     return { dx, dy };
   }
 }
