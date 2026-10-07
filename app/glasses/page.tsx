@@ -83,7 +83,7 @@ export default function GlassesPage() {
         return;
       }
       // Desktop with no camera: run on a still demo photo so the whole pipeline still works.
-      const still = new URLSearchParams(window.location.search).get("still") || "/demo/cooler.jpg";
+      const still = new URLSearchParams(window.location.search).get("still") || "/demo/cooler-back.jpg";
       const im = new Image();
       im.onload = async () => {
         const c = document.createElement("canvas");

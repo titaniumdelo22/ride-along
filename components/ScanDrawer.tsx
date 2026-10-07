@@ -79,7 +79,7 @@ export default function ScanDrawer(p: Props) {
         <form className="px-3 pb-6" onSubmit={(e) => { e.preventDefault(); if (problem.trim()) p.onPlan(problem.trim()); }}>
           <div className="text-sm font-bold">What's going on?</div>
           <div className="mt-2 flex gap-2">
-            <input ref={inputRef} value={problem} onChange={(e) => setProblem(e.target.value)} placeholder="e.g. the cold tap is loose and drips"
+            <input ref={inputRef} value={problem} onChange={(e) => setProblem(e.target.value)} placeholder="e.g. the cold light is off and the water is warm"
               className="flex-1 rounded-full bg-white/10 px-4 py-3 text-sm outline-none placeholder:text-white/40" />
             <button type="button" onClick={p.onMic} className={`rounded-full px-4 text-lg ${p.listening ? "bg-red-500" : "bg-white/10"}`}>🎙️</button>
           </div>
@@ -87,7 +87,7 @@ export default function ScanDrawer(p: Props) {
             {p.planning ? "Ray is looking…" : "Make a plan"}
           </button>
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {["Cold tap is loose and drips", "No cold water", "Not getting cold", "Leaking from the back"].map((q) => (
+            {["Nothing turns on", "COLD light is off, water is warm", "No hot water", "Leaking"].map((q) => (
               <button type="button" key={q} onClick={() => setProblem(q)} className="rounded-full bg-white/10 px-3 py-1 text-xs">{q}</button>
             ))}
           </div>
