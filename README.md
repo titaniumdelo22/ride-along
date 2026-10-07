@@ -1,3 +1,30 @@
+# Ride Along
+
+An AI journeyman on a live video call. Point a phone at the machine; every part lights up in color with its name (**Glasses** view), and a coach talks you through the job step by step while watching the camera (**Call** view).
+
+## Run it (demo day)
+
+```bash
+npm install
+npm run dev          # http://localhost:3000
+cloudflared tunnel --url http://localhost:3000   # prints an https link for the phone
+```
+
+`.env.local` needs:
+
+```
+ANTHROPIC_API_KEY=...   # coach (Call view)
+GEMINI_API_KEY=...      # part detection (Glasses view)
+```
+
+Open the https link on the phone → **Put on the glasses** → allow the camera → point at the cooler. Tap any colored part to hear what it does. **Call my pro** switches to the step-by-step coach.
+
+- `/glasses` — live overlay. Boxes from `gemini-3.1-flash-lite` (~1.2 s per frame, 480-px frames). Labels stay glued to the parts between detections with a tiny built-in camera-motion tracker (`lib/motion.ts`). With no camera (desktop) it runs on `public/demo/cooler.jpg`.
+- `lib/parts.ts` — the fixed parts list, colors, and what the coach says when you tap each one. Edit this to match the machine.
+- "Outlines" (pixel masks from Gemini) exists as a toggle but is **off**: on Oct 7 2026 the mask-capable models took 60–140 s per frame. Leave it off for the demo.
+
+---
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started

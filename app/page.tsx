@@ -17,6 +17,9 @@ export default function Home() {
         <Link href="/call" className="mt-8 flex h-16 items-center justify-center rounded-full bg-gradient-to-r from-[#FF8A3D] to-[#FF3D6E] text-xl font-black shadow-[0_10px_40px_rgba(255,107,26,.5)]">
           📞 Call Ray
         </Link>
+        <Link href="/glasses" className="mt-3 flex h-14 items-center justify-center rounded-full border border-white/25 text-lg font-bold">
+          Put on the glasses
+        </Link>
         <ul className="mt-10 space-y-5 text-lg">
           <li className="flex gap-4"><span className="text-3xl">🔍</span><span><b>What is this?</b> <span className="text-white/65">Ray names it and labels the parts.</span></span></li>
           <li className="flex gap-4"><span className="text-3xl">🧰</span><span><b>What do I need?</b> <span className="text-white/65">Your tools, before you start.</span></span></li>
