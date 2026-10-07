@@ -1,32 +1,78 @@
 import Link from "next/link";
+import RayFace from "./call/RayFace";
+
+const JOBS = [
+  { name: "Mount a TV", task: "I want to mount my TV on the wall. Teach me to do it right.", xp: 300 },
+  { name: "Fix a leaky faucet", task: "My kitchen faucet drips. Teach me to fix it.", xp: 350 },
+  { name: "Cooler won't cool", task: "This water cooler has an out of order sign. I know nothing about it. Help me fix it.", xp: 400 },
+  { name: "Dead outlet", task: "An outlet stopped working. Teach me to check and reset the GFCI safely.", xp: 200 },
+  { name: "Hang a shelf", task: "I want to hang a shelf on the wall so it's level and holds weight.", xp: 150 },
+];
 
 export default function Home() {
   return (
-    <main className="min-h-dvh bg-[#0E0E0E] text-white">
-      <div className="relative h-[46vh] min-h-[300px] bg-[url(https://images.unsplash.com/photo-1621905251189-08b45d6a269e?w=1200&q=70)] bg-cover bg-center">
-        <div className="absolute inset-0 bg-gradient-to-b from-black/30 to-[#0E0E0E]" />
-        <div className="absolute left-6 top-6 text-2xl font-extrabold tracking-tight">
-          ride<span className="text-[#FF6B1A]">along</span>
+    <main className="min-h-dvh bg-ink text-bone">
+      <div className="hazard h-2" />
+      <div className="mx-auto max-w-xl px-6 pb-14">
+        <header className="flex items-center justify-between pt-5">
+          <span className="font-display text-2xl uppercase tracking-wide">
+            Ride<span className="text-hazard">Along</span>
+          </span>
+          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-bone/50">No experience required</span>
+        </header>
+
+        <section className="mt-9 flex items-end gap-4">
+          <div className="w-32 flex-none -rotate-3">
+            <div className="h-40 overflow-hidden rounded-lg border-2 border-bone">
+              <RayFace talking={false} mood="happy" look={0.5} />
+            </div>
+            <div className="mt-2 font-mono text-[9px] uppercase leading-snug tracking-wider text-bone/55">
+              Ray · Journeyman
+              <br />
+              On call 24/7
+            </div>
+          </div>
+          <p className="mb-9 rounded-2xl rounded-bl-none bg-bone px-4 py-3 text-[15px] font-semibold leading-snug text-ink">
+            Hey, I&apos;m Ray. Point your phone at it. I&apos;ll walk you through it.
+          </p>
+        </section>
+
+        <h1 className="mt-8 font-display text-[3.7rem] uppercase leading-[0.9]">
+          Make DIY fun. Turn anyone into a <span className="text-hazard">tradesman.</span>
+        </h1>
+
+        <Link href="/glasses" className="mt-9 flex h-16 items-center justify-between bg-hazard px-6 font-display text-2xl uppercase tracking-wide text-ink active:translate-y-0.5">
+          Scan it <span>→</span>
+        </Link>
+        <Link href="/call" className="mt-3 flex h-14 items-center justify-between border-2 border-bone px-6 font-display text-xl uppercase tracking-wide active:translate-y-0.5">
+          Ask Ray <span>→</span>
+        </Link>
+
+        <h2 className="mt-14 font-mono text-[11px] uppercase tracking-[0.25em] text-bone/50">Pick a job</h2>
+        <ul className="mt-3 divide-y divide-bone/15 border-y border-bone/15">
+          {JOBS.map((j) => (
+            <li key={j.name}>
+              <Link href={`/call?task=${encodeURIComponent(j.task)}&name=${encodeURIComponent(j.name)}`} className="flex items-baseline justify-between py-4 active:opacity-60">
+                <span className="font-display text-[1.9rem] uppercase leading-none tracking-wide">{j.name}</span>
+                <span className="font-mono text-xs text-hazard">+{j.xp} XP</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+
+        <div className="mt-14 grid grid-cols-3 gap-3 font-mono text-[11px] uppercase tracking-wider text-bone/55">
+          <div>
+            <span className="block font-display text-5xl leading-none text-bone">01</span>Scan it
+          </div>
+          <div>
+            <span className="block font-display text-5xl leading-none text-bone">02</span>Ask Ray
+          </div>
+          <div>
+            <span className="block font-display text-5xl leading-none text-hazard">03</span>Level up
+          </div>
         </div>
       </div>
-      <div className="relative mx-auto -mt-24 max-w-xl px-6 pb-12">
-        <h1 className="text-5xl font-extrabold leading-[1.02] tracking-tight">
-          Make DIY fun. Turn anyone into a <span className="text-[#FF6B1A]">tradesman.</span>
-        </h1>
-        <p className="mt-4 text-lg text-white/75">Point your phone at it. Ray, your AI pro, sees what you see and walks you through it out loud.</p>
-        <Link href="/glasses" className="mt-8 flex h-16 items-center justify-center rounded-full bg-gradient-to-r from-[#FF8A3D] to-[#FF3D6E] text-xl font-black shadow-[0_10px_40px_rgba(255,107,26,.5)]">
-          🔍 Scan it
-        </Link>
-        <Link href="/call" className="mt-3 flex h-14 items-center justify-center rounded-full border border-white/25 text-lg font-bold">
-          📞 Ask Ray
-        </Link>
-        <ul className="mt-10 space-y-5 text-lg">
-          <li className="flex gap-4"><span className="text-3xl">🔍</span><span><b>What is this?</b> <span className="text-white/65">Ray names it and labels the parts.</span></span></li>
-          <li className="flex gap-4"><span className="text-3xl">🧰</span><span><b>What do I need?</b> <span className="text-white/65">Your tools, before you start.</span></span></li>
-          <li className="flex gap-4"><span className="text-3xl">🎮</span><span><b>Fix it, level up.</b> <span className="text-white/65">Step by step, at your speed. Earn XP.</span></span></li>
-          <li className="flex gap-4"><span className="text-3xl">🛑</span><span><b>Stay safe.</b> <span className="text-white/65">Ray stops you before you get hurt.</span></span></li>
-        </ul>
-      </div>
+      <div className="hazard h-2" />
     </main>
   );
 }

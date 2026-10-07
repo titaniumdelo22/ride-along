@@ -1,9 +1,9 @@
 /** Ray on the call: a cartoon journeyman whose mouth moves when he talks, who blinks, and glances toward the part he points at. */
-export default function RayFace({ talking, mood, look }: { talking: boolean; mood: "ok" | "happy" | "worried"; look: number }) {
+export default function RayFace({ talking, mood, look, head = false }: { talking: boolean; mood: "ok" | "happy" | "worried"; look: number; head?: boolean }) {
   const px = Math.max(-1, Math.min(1, look)) * 1.8;
   const box = { transformBox: "fill-box" as const, transformOrigin: "center" };
   return (
-    <svg viewBox="0 0 100 130" className="h-full w-full" aria-label="Ray">
+    <svg viewBox={head ? "12 14 76 80" : "0 0 100 130"} className="h-full w-full" aria-label="Ray">
       <defs>
         <radialGradient id="rayBg" cx="50%" cy="35%" r="80%">
           <stop offset="0%" stopColor="#5A3A24" />

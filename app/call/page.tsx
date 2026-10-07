@@ -203,6 +203,7 @@ export default function CallPage() {
   const [camError, setCamError] = useState<string | null>(null);
   // The start, one question per page: your level (asked once), point at it, or pick the job.
   const [page, setPage] = useState<"level" | "point" | "job">("level");
+  const [picked, setPicked] = useState<{ task: string; name: string } | null>(null); // a job tapped on the home page
   const [task, setTask] = useState(MISSIONS[0].task);
   // Always on: read the label, and teach (ask what comes next) instead of just telling.
   const scanLabel = true;
@@ -265,6 +266,14 @@ export default function CallPage() {
       if (saved === "newbie" || saved === "intermediate" || saved === "advanced") {
         setLevel(saved);
         setPage("point");
+      }
+    } catch {}
+    try {
+      const q = new URLSearchParams(window.location.search);
+      const t = q.get("task");
+      if (t) {
+        setPicked({ task: t.slice(0, 300), name: (q.get("name") ?? "This job").slice(0, 40) });
+        setTask(t.slice(0, 300));
       }
     } catch {}
     setXp(xpRef.current);
@@ -1143,7 +1152,8 @@ export default function CallPage() {
   const toast = toasts[0];
 
   return (
-    <main ref={stageRef} className="fixed inset-0 overflow-hidden bg-[#07070A] text-white select-none">
+    <main ref={stageRef} className="fixed inset-0 overflow-hidden bg-ink text-bone select-none">
+      <div className="hazard pointer-events-none absolute inset-x-0 top-0 z-20 h-1.5" />
       <video ref={videoRef} playsInline muted className="absolute inset-0 h-full w-full object-cover" />
       <canvas ref={canvasRef} className="hidden" />
       {phase === "identify" && snapBox && snap && (
@@ -1156,8 +1166,10 @@ export default function CallPage() {
 
       {/* Top: Ray (like a FaceTime bubble) and the XP bar */}
       <div className="absolute inset-x-4 top-4 flex items-center gap-3">
-        <div className={`relative grid h-14 w-14 flex-none place-items-center rounded-full bg-gradient-to-br from-[#FF8A3D] to-[#E4540B] text-3xl shadow-[0_0_24px_rgba(255,107,26,.6)] ${speaking ? "ring-4 ring-[#FF6B1A]/60 animate-pulse" : ""} ${phase === "guiding" ? "hidden" : ""}`}>
-          <span key={mood} className="animate-[pop_.35s_ease-out]">{mood}</span>
+        <div className={`relative grid h-14 w-14 flex-none place-items-center rounded-full border-2 border-bone ${speaking ? "ring-4 ring-[#22C55E]/70" : ""} ${phase === "guiding" ? "hidden" : ""}`}>
+          <span className="block h-full w-full overflow-hidden rounded-full">
+            <RayFace head talking={speaking} mood={safety || flash === "bad" ? "worried" : flash === "good" || phase === "done" ? "happy" : "ok"} look={0} />
+          </span>
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between text-sm">
@@ -1171,7 +1183,7 @@ export default function CallPage() {
                   aria-label="Hands-free on or off"
                 >
                   {!handsFree ? "🎧 Off" : needTap ? (
-                    <span className="animate-pulse">👆 Tap anywhere to listen</span>
+                    <span className="animate-pulse">👆 Tap to listen</span>
                   ) : earOn && !speaking ? (
                     <>
                       <span className="h-2 w-2 animate-pulse rounded-full bg-black" /> Listening
@@ -1186,11 +1198,11 @@ export default function CallPage() {
             </span>
           </div>
           <div className="mt-1 flex items-center gap-2">
-            <span className="rounded-md bg-white/15 px-1.5 py-0.5 text-[11px] font-extrabold uppercase tracking-wide">{lvl.name}</span>
+            <span className="bg-bone px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-ink">{lvl.name}</span>
             <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-white/15">
-              <div className="h-full rounded-full bg-gradient-to-r from-[#FFD23F] via-[#FF6B1A] to-[#FF3D6E] transition-all duration-700" style={{ width: `${Math.round(lvl.pct * 100)}%` }} />
+              <div className="h-full rounded-full bg-hazard transition-all duration-700" style={{ width: `${Math.round(lvl.pct * 100)}%` }} />
             </div>
-            <span className="text-xs font-bold tabular-nums text-[#FFD23F]">{xp} XP</span>
+            <span className="font-mono text-xs font-bold tabular-nums text-hazard">{xp} XP</span>
           </div>
         </div>
       </div>
@@ -1280,7 +1292,7 @@ export default function CallPage() {
           <div className="flex items-center gap-4">
             <div className="grid h-16 w-16 place-items-center rounded-2xl bg-[#FFD23F]/15 text-5xl">{BADGES[toast].icon}</div>
             <div>
-              <div className="text-xs font-extrabold uppercase tracking-[0.2em] text-[#FFD23F]">Badge unlocked</div>
+              <div className="text-xs font-mono font-bold uppercase tracking-[0.2em] text-[#FFD23F]">Badge unlocked</div>
               <div className="text-2xl font-black">{BADGES[toast].name}</div>
               <div className="text-sm text-white/70">{BADGES[toast].why}</div>
             </div>
@@ -1292,7 +1304,7 @@ export default function CallPage() {
       {levelUp && (
         <div className="pointer-events-none absolute inset-0 grid place-items-center bg-black/40">
           <div className="animate-[pop_.5s_ease-out] text-center">
-            <div className="text-sm font-extrabold uppercase tracking-[0.3em] text-[#FFD23F]">Level up</div>
+            <div className="text-sm font-mono font-bold uppercase tracking-[0.3em] text-[#FFD23F]">Level up</div>
             <div className="mt-2 bg-gradient-to-r from-[#FFD23F] via-[#FF6B1A] to-[#FF3D6E] bg-clip-text text-5xl font-black text-transparent">{levelUp}</div>
           </div>
         </div>
@@ -1332,7 +1344,7 @@ export default function CallPage() {
       {/* SETUP, page 1: your level (asked once, then remembered) */}
       {phase === "setup" && page === "level" && (
         <div className="absolute inset-x-0 bottom-0 animate-[rise_.4s_ease-out] px-6 pb-10">
-          <h1 className="text-4xl font-black leading-[1.05]">Have you done this before?</h1>
+          <h1 className="font-display text-5xl uppercase leading-[0.92]">Have you done this before?</h1>
           <p className="mt-2 text-white/60">Ray goes at your speed.</p>
           <div className="mt-6 divide-y divide-white/10 border-y border-white/10">
             {LEVEL_PICKS.map((l) => (
@@ -1349,7 +1361,7 @@ export default function CallPage() {
                 className="flex w-full items-center gap-4 py-5 text-left active:opacity-60"
               >
                 <span className="text-4xl">{l.icon}</span>
-                <span className="flex-1 text-2xl font-extrabold">{l.hint}</span>
+                <span className="flex-1 font-display text-3xl uppercase tracking-wide">{l.hint}</span>
                 <span className="text-2xl text-white/40">›</span>
               </button>
             ))}
@@ -1360,20 +1372,30 @@ export default function CallPage() {
       {/* SETUP, page 2: point at it */}
       {phase === "setup" && page === "point" && (
         <div className="absolute inset-x-0 bottom-0 animate-[rise_.4s_ease-out] px-6 pb-10">
-          <h1 className="text-4xl font-black leading-[1.05]">Point at what&apos;s broken.</h1>
+          <h1 className="font-display text-5xl uppercase leading-[0.92]">Point at what&apos;s broken.</h1>
           {(camError || error) && <p className="mt-3 text-sm text-red-300">{camError ?? error}</p>}
+          {picked && (
+            <button
+              onClick={() => begin(picked.task)}
+              className="mt-6 flex h-20 w-full items-center justify-between bg-hazard px-6 font-display text-3xl uppercase tracking-wide text-ink active:translate-y-0.5"
+            >
+              {picked.name} <span>→</span>
+            </button>
+          )}
           <button
             onClick={() => lookAt()}
-            className="mt-6 flex h-20 w-full items-center justify-center gap-3 rounded-full bg-gradient-to-r from-[#FF8A3D] to-[#FF3D6E] text-2xl font-black shadow-[0_10px_40px_rgba(255,107,26,.5)] active:scale-[.98]"
+            className={`mt-3 flex h-20 w-full items-center justify-between px-6 font-display text-[1.5rem] uppercase tracking-wide active:translate-y-0.5 ${picked ? "border-2 border-bone" : "mt-6 bg-hazard text-ink"}`}
           >
-            🔍 What am I looking at?
+            What am I looking at? <span>→</span>
           </button>
-          <button onClick={() => setPage("job")} className="mt-5 w-full text-center text-lg font-bold text-white/80">
-            I know what it is →
-          </button>
-          <button onClick={() => lookAt(undefined, "parts")} className="mt-3 w-full text-center text-lg font-bold text-white/80">
-            🔩 Sort my screws and parts
-          </button>
+          <div className="mt-5 divide-y divide-bone/15 border-y border-bone/15 font-mono text-sm uppercase tracking-[0.15em]">
+            <button onClick={() => setPage("job")} className="flex w-full justify-between py-3.5 text-left active:opacity-60">
+              I know what it is <span>→</span>
+            </button>
+            <button onClick={() => lookAt(undefined, "parts")} className="flex w-full justify-between py-3.5 text-left active:opacity-60">
+              Sort my screws + parts <span>→</span>
+            </button>
+          </div>
           <button onClick={() => setPage("level")} className="mt-4 w-full text-center text-sm text-white/40">
             {LEVEL_PICKS.find((l) => l.id === level)?.icon} {LEVEL_PICKS.find((l) => l.id === level)?.name} · change
           </button>
@@ -1386,7 +1408,7 @@ export default function CallPage() {
           <button onClick={() => setPage("point")} className="mb-3 text-lg text-white/60">
             ‹ Back
           </button>
-          <h1 className="text-4xl font-black leading-[1.05]">What&apos;s the job?</h1>
+          <h1 className="font-display text-5xl uppercase leading-[0.92]">What&apos;s the job?</h1>
           {error && <p className="mt-3 text-sm text-red-300">{error}</p>}
           <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => addPhotos(e.target.files)} />
           <div className="mt-5 divide-y divide-white/10 border-y border-white/10">
@@ -1400,7 +1422,7 @@ export default function CallPage() {
               >
                 <span className="text-3xl">🔁</span>
                 <span className="flex-1 leading-tight">
-                  <span className="block text-xl font-extrabold">Put it back together</span>
+                  <span className="block font-display text-[1.65rem] uppercase leading-none tracking-wide">Put it back together</span>
                   <span className="text-sm text-white/55">Using your {befores.length} before photos</span>
                 </span>
                 <span className="flex -space-x-3">
@@ -1413,7 +1435,7 @@ export default function CallPage() {
             <button onClick={() => fileRef.current?.click()} className="flex w-full items-center gap-4 py-4 text-left active:opacity-60">
               <span className="text-3xl">📸</span>
               <span className="flex-1 leading-tight">
-                <span className="block text-xl font-extrabold">{befores.length ? "New before photos" : "Add before photos"}</span>
+                <span className="block font-display text-[1.65rem] uppercase leading-none tracking-wide">{befores.length ? "New before photos" : "Add before photos"}</span>
                 <span className="text-sm text-white/55">Took it apart? Ray puts it back the way it was</span>
               </span>
             </button>
@@ -1427,7 +1449,7 @@ export default function CallPage() {
                 className="flex w-full items-center gap-4 py-4 text-left active:opacity-60"
               >
                 <span className="text-3xl">{m.icon}</span>
-                <span className="flex-1 text-xl font-extrabold leading-tight">{m.title}</span>
+                <span className="flex-1 font-display text-[1.65rem] uppercase leading-none tracking-wide">{m.title}</span>
                 <span className="text-sm font-bold text-[#FFD23F]">+{m.xp} XP</span>
               </button>
             ))}
@@ -1464,7 +1486,7 @@ export default function CallPage() {
         <>
           <div className="pointer-events-none absolute inset-x-6 h-1 animate-[scan_2.4s_ease-in-out_infinite] rounded-full bg-[#FF6B1A] shadow-[0_0_30px_8px_rgba(255,107,26,.6)]" />
           <div className="absolute inset-x-0 bottom-0 p-6 pb-12 text-center">
-            <div className="text-2xl font-black">Ray is taking a look…</div>
+            <div className="font-display text-4xl uppercase">Ray is taking a look…</div>
             <div className="mt-1 text-white/70">Hold steady on the whole thing</div>
           </div>
         </>
@@ -1512,8 +1534,8 @@ export default function CallPage() {
             <>
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  {foundMode === "parts" && <div className="mb-1 text-xs font-extrabold uppercase tracking-[0.25em] text-[#FFB38A]">🔩 Your parts</div>}
-                  <h1 className="text-3xl font-black leading-none">{found.name}</h1>
+                  {foundMode === "parts" && <div className="mb-1 text-xs font-mono font-bold uppercase tracking-[0.25em] text-[#FFB38A]">🔩 Your parts</div>}
+                  <h1 className="font-display text-4xl uppercase leading-[0.95]">{found.name}</h1>
                   <p className="mt-1.5 text-white/70">{found.what}</p>
                   {found.focus && (
                     <p className="mt-3 text-lg font-extrabold leading-snug">
@@ -1537,7 +1559,7 @@ export default function CallPage() {
                   <span>{found.callPro}</span>
                 </div>
               )}
-              <div className="mt-4 text-xs font-extrabold uppercase tracking-[0.2em] text-[#FFB38A]">You&apos;ll need</div>
+              <div className="mt-4 text-xs font-mono font-bold uppercase tracking-[0.2em] text-[#FFB38A]">You&apos;ll need</div>
               <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
                 {found.tools.map((t, i) => (
                   <div key={i} className="flex-none rounded-2xl bg-white/10 px-3 py-2 text-center">
@@ -1546,7 +1568,7 @@ export default function CallPage() {
                   </div>
                 ))}
               </div>
-              <div className="mt-4 text-xs font-extrabold uppercase tracking-[0.2em] text-[#FFB38A]">{foundMode === "parts" ? "Putting them back" : "Start here"}</div>
+              <div className="mt-4 text-xs font-mono font-bold uppercase tracking-[0.2em] text-[#FFB38A]">{foundMode === "parts" ? "Putting them back" : "Start here"}</div>
               <ol className="mt-2 space-y-2">
                 {found.start.slice(0, 3).map((x, i) => (
                   <li key={i} className="flex items-center gap-3" onClick={() => speak(`${x.title}. ${x.how}`)}>
@@ -1561,7 +1583,7 @@ export default function CallPage() {
               {found.missions[0] && (
                 <button
                   onClick={fixIt}
-                  className="mt-5 flex h-16 w-full items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#FF8A3D] to-[#FF3D6E] text-xl font-black shadow-[0_10px_40px_rgba(255,107,26,.5)] active:scale-[.98]"
+                  className="mt-5 flex h-16 w-full items-center justify-center gap-2 bg-hazard text-ink font-display uppercase tracking-wide text-xl font-black active:scale-[.98]"
                 >
                   {foundMode === "parts" ? "🔁 Put it back together" : "📞 Fix it with Ray"}
                 </button>
@@ -1608,8 +1630,10 @@ export default function CallPage() {
       {/* PLANNING */}
       {phase === "planning" && (
         <div className="absolute inset-x-0 bottom-0 p-6 pb-12 text-center">
-          <div className="mx-auto mb-5 grid h-20 w-20 animate-bounce place-items-center rounded-full bg-gradient-to-br from-[#FF8A3D] to-[#E4540B] text-4xl">📞</div>
-          <div className="text-2xl font-black">Ray is picking up…</div>
+          <div className="mx-auto mb-5 h-24 w-24 animate-bounce overflow-hidden rounded-full border-2 border-bone">
+            <RayFace head talking mood="happy" look={0} />
+          </div>
+          <div className="font-display text-4xl uppercase">Ray is picking up…</div>
           <div className="mt-1 text-white/70">{scanLabel ? "Reading the label, sizing up the job" : "Sizing up the job"}</div>
           <div className="mx-auto mt-5 max-w-xs rounded-2xl bg-white/10 px-4 py-3 text-sm text-white/80">💡 Pro tip: {["Unplug first. Always.", "Read the data plate before you diagnose anything.", "Most no-cool calls are airflow, not refrigerant.", "Gloves on before your hands go behind a unit."][Math.floor(Date.now() / 4000) % 4]}</div>
         </div>
@@ -1618,8 +1642,8 @@ export default function CallPage() {
       {/* LOADOUT: the tools for this job */}
       {phase === "loadout" && kit && (
         <div className="absolute inset-0 overflow-y-auto bg-black/75 p-6 pt-24 backdrop-blur-md">
-          <div className="text-xs font-extrabold uppercase tracking-[0.3em] text-[#FFB38A]">Loadout</div>
-          <h1 className="mt-1 text-3xl font-black leading-tight">Grab your gear</h1>
+          <div className="text-xs font-mono font-bold uppercase tracking-[0.3em] text-[#FFB38A]">Loadout</div>
+          <h1 className="mt-1 font-display text-5xl uppercase leading-none">Grab your gear</h1>
           <div className="mt-1 text-white/60">
             {kit.product.name}
             {kit.product.model ? ` · ${kit.product.model}` : ""} · {LEVEL_PICKS.find((l) => l.id === level)?.icon} {LEVEL_PICKS.find((l) => l.id === level)?.name}
@@ -1656,7 +1680,7 @@ export default function CallPage() {
             {handsFree && <div className="mt-1 text-white/45">Say “let&apos;s go” when you&apos;re ready</div>}
           </div>
           {plan ? (
-            <button onClick={go} className="mt-5 h-16 w-full animate-[pop_.4s_ease-out] rounded-full bg-gradient-to-r from-[#FF8A3D] to-[#FF3D6E] text-xl font-black shadow-[0_10px_40px_rgba(255,107,26,.5)] active:scale-[.98]">
+            <button onClick={go} className="mt-5 h-16 w-full animate-[pop_.4s_ease-out] bg-hazard text-ink font-display uppercase tracking-wide text-xl font-black active:scale-[.98]">
               {gear.size >= kit.tools.length ? "Let's go 🚀" : "Start anyway"}
             </button>
           ) : planFailed ? (
@@ -1685,11 +1709,11 @@ export default function CallPage() {
               <div key={current} className="grid h-full w-full animate-[pop_.4s_ease-out] place-items-center rounded-full bg-[#121216] text-5xl">{step.icon}</div>
             </div>
             <div className="min-w-0">
-              <div className="text-xs font-extrabold uppercase tracking-[0.2em] text-[#FFB38A]">
+              <div className="text-xs font-mono font-bold uppercase tracking-[0.2em] text-[#FFB38A]">
                 Step {current + 1} / {plan.steps.length}{" "}
                 {(step as JobStep).surprise ? <span className="text-[#F59E0B]">· 🚧 Curveball</span> : <span className="text-[#FFD23F]">· +75 XP</span>}
               </div>
-              <div className="text-3xl font-black leading-tight">{step.title}</div>
+              <div className="font-display text-[2.1rem] uppercase leading-[0.95]">{step.title}</div>
             </div>
           </div>
           <div className={`mt-4 grid gap-2.5 ${handsFree ? "grid-cols-4" : "grid-cols-5"}`}>
@@ -1755,7 +1779,7 @@ export default function CallPage() {
       {phase === "done" && plan && (
         <div className="absolute inset-0 overflow-y-auto bg-[radial-gradient(ellipse_at_top,#3A1A06,#07070A_60%)] p-6 pt-24">
           <div className="text-center">
-            <div className="text-xs font-extrabold uppercase tracking-[0.3em] text-[#22C55E]">Mission complete</div>
+            <div className="text-xs font-mono font-bold uppercase tracking-[0.3em] text-[#22C55E]">Mission complete</div>
             <div className="mt-3 text-6xl tracking-widest">
               {[0, 1, 2].map((i) => (
                 <span key={i} className={`inline-block animate-[pop_.5s_ease-out] ${i < stars ? "text-[#FFD23F] drop-shadow-[0_0_12px_rgba(255,210,63,.7)]" : "text-white/15"}`} style={{ animationDelay: `${i * 0.25}s` }}>
@@ -1763,7 +1787,7 @@ export default function CallPage() {
                 </span>
               ))}
             </div>
-            <h1 className="mt-3 text-3xl font-black leading-tight">{plan.product.name}</h1>
+            <h1 className="mt-3 font-display text-4xl uppercase leading-[0.95]">{plan.product.name}</h1>
             <div className="mt-1 text-white/60">
               {plan.steps.length} steps · {mm}:{ss} · {mistakes.length} {mistakes.length === 1 ? "mistake" : "mistakes"}
             </div>
@@ -1826,7 +1850,7 @@ export default function CallPage() {
               <div className="animate-[rise_.45s_ease-out]">
                 <p className="mt-3 text-xl font-extrabold leading-snug">{report.headline}</p>
                 <p className="mt-3 leading-relaxed text-white/80">{report.didWhat}</p>
-                <h3 className="mt-5 text-xs font-extrabold uppercase tracking-[0.2em] text-[#FFB38A]">What I learned</h3>
+                <h3 className="mt-5 text-xs font-mono font-bold uppercase tracking-[0.2em] text-[#FFB38A]">What I learned</h3>
                 <ul className="mt-2 space-y-1.5">
                   {report.learned.map((x, i) => (
                     <li key={i} className="flex gap-2">
@@ -1835,7 +1859,7 @@ export default function CallPage() {
                     </li>
                   ))}
                 </ul>
-                <h3 className="mt-5 text-xs font-extrabold uppercase tracking-[0.2em] text-[#FFB38A]">Teach it to someone</h3>
+                <h3 className="mt-5 text-xs font-mono font-bold uppercase tracking-[0.2em] text-[#FFB38A]">Teach it to someone</h3>
                 <ol className="mt-2 space-y-1.5">
                   {report.teachBack.map((x, i) => (
                     <li key={i} className="flex gap-2">
@@ -1872,7 +1896,7 @@ export default function CallPage() {
                 setReport(null);
                 setCaption(null);
               }}
-              className="h-16 rounded-full bg-gradient-to-r from-[#FF8A3D] to-[#FF3D6E] text-xl font-black shadow-[0_10px_40px_rgba(255,107,26,.5)]"
+              className="h-16 bg-hazard text-ink font-display uppercase tracking-wide text-xl font-black"
             >
               Next mission →
             </button>
