@@ -49,7 +49,9 @@ function said(raw: string, phrases: string[]): boolean {
   return phrases.includes(t);
 }
 
-const WATCH_EVERY_MS = 2500;
+// Live, like FaceTime: a fresh look every 1.5 s, up to 2 in flight at once (each takes a few seconds round trip).
+const WATCH_EVERY_MS = 1500;
+const MAX_LOOKS = 2;
 const ORANGE = "#FF6B1A";
 
 // ── The game: levels, missions, badges ───────────────────────────────────────
@@ -155,7 +157,12 @@ export default function CallPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
-  const busy = useRef(false);
+  const inFlight = useRef(0);
+  const seqRef = useRef(0); // each look is numbered so an older answer never overwrites a newer one
+  const appliedRef = useRef(0);
+  const currentRef = useRef(0);
+  const movingRef = useRef(false); // the camera is moving: wait until they hold still, then look
+  const lastSayAt = useRef(0);
   const recentRef = useRef<string[]>([]);
   const questionsRef = useRef<string[]>([]);
   const redoneRef = useRef<string[]>([]);
@@ -170,7 +177,6 @@ export default function CallPage() {
   const talkingRef = useRef(false);
   const uttRef = useRef<SpeechSynthesisUtterance | null>(null);
   const onHeardRef = useRef<(text: string) => void>(() => {});
-  const pendingAsk = useRef<string | null>(null);
   const voiceAt = useRef(0); // last time we heard the learner start talking
   const tickRef = useRef<(userSaid: string | null) => void>(() => {});
   // Steps written ahead while they read the "What is this?" screen.
@@ -203,6 +209,8 @@ export default function CallPage() {
   const [earOn, setEarOn] = useState(false);
   const [heard, setHeard] = useState<string | null>(null);
   const [curveball, setCurveball] = useState<string | null>(null);
+  const [sees, setSees] = useState<string | null>(null);
+  const [cam, setCam] = useState({ dark: false, moving: false });
   // Before photos: how it looked as it came apart (from a job with Ray, or added from the camera roll).
   const [befores, setBefores] = useState<string[]>([]);
   const [jobBefores, setJobBefores] = useState<string[]>([]);
@@ -275,16 +283,16 @@ export default function CallPage() {
     startCamera();
   }, [startCamera]);
 
-  const capture = useCallback((): string | null => {
+  const capture = useCallback((maxW = 768, quality = 0.6): string | null => {
     const v = videoRef.current;
     const c = canvasRef.current;
     if (!v || !c || !v.videoWidth) return null;
-    const w = Math.min(768, v.videoWidth);
+    const w = Math.min(maxW, v.videoWidth);
     const h = Math.round((v.videoHeight / v.videoWidth) * w);
     c.width = w;
     c.height = h;
     c.getContext("2d")?.drawImage(v, 0, 0, w, h);
-    return c.toDataURL("image/jpeg", 0.6).split(",")[1] ?? null;
+    return c.toDataURL("image/jpeg", quality).split(",")[1] ?? null;
   }, []);
 
   // ── Voice in, hands-free (the mic is closed while Ray talks so he doesn't hear himself) ─
@@ -352,6 +360,7 @@ export default function CallPage() {
       if (uttRef.current !== u) return;
       uttRef.current = null;
       talkingRef.current = false;
+      lastSayAt.current = Date.now();
       setSpeaking(false);
       setTimeout(startEar, 350);
     };
@@ -638,6 +647,7 @@ export default function CallPage() {
     startedAt.current = Date.now();
     const first = capture();
     shotsRef.current = first ? [first] : [];
+    setSees(null);
     setPhase("guiding");
     award(10 * plan.tools.length, ["🎒 Geared up"]);
     speak(`${plan.intro} ${current > 0 ? `Picking up at step ${current + 1}` : "Step one"}: ${plan.steps[current].instruction}`);
@@ -647,31 +657,35 @@ export default function CallPage() {
   const tick = useCallback(
     async (userSaid: string | null = null) => {
       if (!plan) return;
-      if (busy.current) {
-        if (userSaid) pendingAsk.current = userSaid;
-        return;
+      if (!userSaid) {
+        if (inFlight.current >= MAX_LOOKS) return;
+        if (Date.now() - voiceAt.current < 2500) return; // they're talking: wait for what they say
+        if (movingRef.current) return; // wait until they hold still
       }
-      // Let Ray finish a sentence before looking again (a question always goes through).
-      if (!userSaid && typeof window !== "undefined" && window.speechSynthesis?.speaking) return;
-      // ...and never talks over the learner.
-      if (!userSaid && Date.now() - voiceAt.current < 2500) return;
-      busy.current = true;
+      const seq = ++seqRef.current;
+      const at = current;
+      inFlight.current++;
       try {
         const res = await fetch("/api/watch", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ frame: capture(), task, level, plan, current, teach, recent: recentRef.current, userSaid, surprises: surprisesRef.current, ref: refPhoto(current) }),
+          body: JSON.stringify({ frame: capture(512, 0.5), task, level, plan, current: at, teach, recent: recentRef.current, userSaid, surprises: surprisesRef.current, ref: refPhoto(at) }),
         });
         const w = (await res.json()) as Watch & { error?: string };
         if (w.error) return;
-        setPoint(w.point);
+        // A newer look already landed: this one is old news (a question always counts).
+        if (!userSaid && seq < appliedRef.current) return;
+        appliedRef.current = Math.max(appliedRef.current, seq);
+        const sameStep = currentRef.current === at;
+        setSees(w.see);
+        if (!movingRef.current) setPoint(w.point);
         setAim(w.aim);
         if (w.safety) {
           setFlash("danger");
           cue("danger");
         }
         setSafety(w.safety);
-        if (w.mistake) {
+        if (w.mistake && sameStep) {
           setMistakes((m) => [...m, w.mistake as string]);
           stepMistake.current = true;
           comboRef.current = 0;
@@ -681,37 +695,80 @@ export default function CallPage() {
         }
         // A curveball: Ray adds the steps to handle it, right here, before the rest of the job.
         let detour = false;
-        if (w.surprise && !surprisesRef.current.includes(w.surprise.what)) {
+        if (w.surprise && sameStep && !surprisesRef.current.includes(w.surprise.what)) {
           surprisesRef.current = [...surprisesRef.current, w.surprise.what];
           const extra: JobStep[] = w.surprise.steps.map((x) => ({ ...x, surprise: true }));
           if (extra.length) {
             detour = true;
-            setPlan((p) => (p ? { ...p, steps: [...p.steps.slice(0, current), ...extra, ...p.steps.slice(current)] } : p));
+            setPlan((p) => (p ? { ...p, steps: [...p.steps.slice(0, at), ...extra, ...p.steps.slice(at)] } : p));
           }
           setCurveball(w.surprise.what);
           cue("badge");
           award(30, ["🚧 Curveball spotted"]);
         }
+        // Talk like a person on a call: answer questions right away, otherwise short reactions with a breath between them.
         const theyreTalking = !userSaid && Date.now() - voiceAt.current < 2500;
-        if (w.say && !theyreTalking && (userSaid || !window.speechSynthesis?.speaking)) speak(w.say);
-        else if (w.safety) speak(w.safety);
-        if (w.stepDone && !detour) {
-          if ((plan.steps[current] as JobStep).surprise) unlock("curveball");
-          stepCleared(current, plan.steps.length);
+        const rayTalking = !!window.speechSynthesis?.speaking;
+        if (w.say && !theyreTalking && (userSaid || (!rayTalking && Date.now() - lastSayAt.current > 2000))) speak(w.say);
+        else if (w.safety && !rayTalking) speak(w.safety);
+        if (w.stepDone && sameStep && !detour) {
+          if ((plan.steps[at] as JobStep).surprise) unlock("curveball");
+          stepCleared(at, plan.steps.length);
         }
       } catch {
-        // The next tick tries again.
+        // The next look tries again.
       } finally {
-        busy.current = false;
-        const q = pendingAsk.current;
-        if (q) {
-          pendingAsk.current = null;
-          setTimeout(() => tickRef.current(q), 0);
-        }
+        inFlight.current--;
       }
     },
     [plan, capture, task, level, current, teach, speak, stepCleared, award, unlock, refPhoto]
   );
+  useEffect(() => {
+    currentRef.current = current;
+  }, [current]);
+
+  // Instant, on the phone, no AI: is the camera moving or too dark? The moment they hold still, Ray looks.
+  useEffect(() => {
+    if (phase !== "guiding") return;
+    const c = document.createElement("canvas");
+    c.width = 32;
+    c.height = 24;
+    const g = c.getContext("2d", { willReadFrequently: true });
+    let prev: Uint8ClampedArray | null = null;
+    let lastMove = 0;
+    const id = setInterval(() => {
+      const v = videoRef.current;
+      if (!g || !v || !v.videoWidth) return;
+      g.drawImage(v, 0, 0, 32, 24);
+      const d = g.getImageData(0, 0, 32, 24).data;
+      const n = d.length / 4;
+      const now = new Uint8ClampedArray(n);
+      let sum = 0;
+      let diff = 0;
+      for (let k = 0; k < n; k++) {
+        const y = (d[k * 4] * 3 + d[k * 4 + 1] * 4 + d[k * 4 + 2]) >> 3;
+        now[k] = y;
+        sum += y;
+        if (prev) diff += Math.abs(y - prev[k]);
+      }
+      if (prev && diff / n > 12) lastMove = Date.now();
+      prev = now;
+      const moving = Date.now() - lastMove < 500;
+      const dark = sum / n < 35;
+      if (moving !== movingRef.current) {
+        movingRef.current = moving;
+        if (moving) setPoint(null);
+        else tickRef.current(null);
+      }
+      setCam((x) => (x.dark === dark && x.moving === moving ? x : { dark, moving }));
+    }, 250);
+    return () => {
+      clearInterval(id);
+      movingRef.current = false;
+      setCam({ dark: false, moving: false });
+    };
+  }, [phase]);
+
   useEffect(() => {
     tickRef.current = tick;
   }, [tick]);
@@ -1025,11 +1082,17 @@ export default function CallPage() {
         </div>
       )}
 
-      {/* Product read from the label */}
-      {plan && phase === "guiding" && (
-        <div className="absolute left-4 top-24 max-w-[60%] rounded-2xl bg-black/45 px-3 py-1.5 text-xs text-white/85 backdrop-blur">
-          <span className="font-semibold text-white">{plan.product.name}</span>
-          {plan.product.model ? ` · ${plan.product.model}` : ""}
+      {/* Live: what Ray sees right now */}
+      {phase === "guiding" && (
+        <div className="absolute left-4 top-24 flex max-w-[68%] items-center gap-2 rounded-full bg-black/55 px-3 py-1.5 text-xs backdrop-blur">
+          <span className="h-2 w-2 flex-none animate-pulse rounded-full bg-red-500" />
+          <span className="font-black tracking-wider">LIVE</span>
+          <span key={sees ?? ""} className="truncate text-white/85 animate-[rise_.3s_ease-out]">{sees ? `· ${sees}` : "· Ray is watching"}</span>
+        </div>
+      )}
+      {phase === "guiding" && (cam.dark || cam.moving) && !safety && (
+        <div className="pointer-events-none absolute left-1/2 top-[38%] -translate-x-1/2 animate-[rise_.2s_ease-out] whitespace-nowrap rounded-full bg-black/65 px-5 py-2.5 text-lg font-extrabold backdrop-blur">
+          {cam.dark ? "🔦 More light, Ray can't see" : "✋ Hold steady"}
         </div>
       )}
 
