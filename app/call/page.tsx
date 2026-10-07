@@ -772,12 +772,13 @@ export default function CallPage() {
       }
       const seq = ++seqRef.current;
       const at = current;
+      const sentFrame = capture(512, 0.5);
       inFlight.current++;
       try {
         const res = await fetch("/api/watch", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ frame: capture(512, 0.5), task, level, plan, current: at, teach, recent: recentRef.current, talk: talkRef.current, userSaid, surprises: surprisesRef.current, ref: refPhoto(at), done: plan.steps.slice(0, at).map((s) => s.title), missingTools: missingRef.current }),
+          body: JSON.stringify({ frame: sentFrame, task, level, plan, current: at, teach, recent: recentRef.current, talk: talkRef.current, userSaid, surprises: surprisesRef.current, ref: refPhoto(at), done: plan.steps.slice(0, at).map((s) => s.title), missingTools: missingRef.current }),
         });
         const w = (await res.json()) as Watch & { error?: string };
         if (w.error) return;
@@ -786,7 +787,20 @@ export default function CallPage() {
         appliedRef.current = Math.max(appliedRef.current, seq);
         const sameStep = currentRef.current === at;
         setSees(w.see);
-        if (w.point) setPoint(w.point);
+        if (w.point) {
+          setPoint(w.point);
+          // Claude says what; Gemini finds exactly where, so the ring lands on the part.
+          const pt = w.point;
+          if (sentFrame) {
+            fetch("/api/locate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ frame: sentFrame, names: [pt.label] }) })
+              .then((r) => r.json())
+              .then((l: { spots?: { label: string; x: number; y: number }[] }) => {
+                const s0 = l.spots?.[0];
+                if (s0) setPoint((cur) => (cur && cur.label === pt.label ? { ...cur, x: s0.x, y: s0.y } : cur));
+              })
+              .catch(() => {});
+          }
+        }
         setAim(w.aim);
         if (w.safety) {
           setFlash("danger");
