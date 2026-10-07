@@ -293,12 +293,12 @@ export default function GlassesPage() {
       </div>
 
       {/* bottom bar */}
-      <div className="absolute bottom-0 inset-x-0 p-3 pb-6 flex items-center gap-2 bg-gradient-to-t from-black/80 to-transparent text-xs">
+      <div className="absolute bottom-0 inset-x-0 p-3 pb-6 flex items-center gap-1.5 whitespace-nowrap bg-gradient-to-t from-black/80 to-transparent text-xs">
         <button onClick={() => setPaused((p) => !p)} className="rounded-full bg-white/15 px-3 py-2 font-semibold backdrop-blur">{paused ? "Resume" : "Freeze"}</button>
-        <button onClick={() => setTracking((t) => !t)} className={`rounded-full px-3 py-2 font-semibold backdrop-blur ${tracking ? "bg-white/25" : "bg-white/15 text-white/60"}`}>Track {tracking ? "on" : "off"}</button>
-        <button onClick={() => setUseMasks((m) => !m)} className={`rounded-full px-3 py-2 font-semibold backdrop-blur ${useMasks ? "bg-[#FF6B1A] text-black" : "bg-white/15"}`}>Outlines {useMasks ? "on" : "off"}</button>
+        <button onClick={() => setTracking((t) => !t)} className={`rounded-full px-3 py-2 font-semibold backdrop-blur ${tracking ? "bg-white/25" : "bg-white/15 text-white/60"}`}>Track</button>
+        <button onClick={() => setUseMasks((m) => !m)} className={`rounded-full px-3 py-2 font-semibold backdrop-blur ${useMasks ? "bg-[#FF6B1A] text-black" : "bg-white/15"}`}>Outlines</button>
         <Link href="/call" className="rounded-full bg-white/15 px-3 py-2 font-semibold backdrop-blur">Call my pro →</Link>
-        <span className="ml-auto text-white/60 tabular-nums">boxes {ms.box ? `${(ms.box / 1000).toFixed(1)}s` : "–"} · outlines {ms.mask ? `${(ms.mask / 1000).toFixed(1)}s` : "–"}</span>
+        <span className="ml-auto hidden sm:inline text-white/60 tabular-nums">boxes {ms.box ? `${(ms.box / 1000).toFixed(1)}s` : "–"} · outlines {ms.mask ? `${(ms.mask / 1000).toFixed(1)}s` : "–"}</span>
       </div>
 
       {needTap && (
