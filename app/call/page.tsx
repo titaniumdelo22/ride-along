@@ -19,12 +19,33 @@ type Recognition = {
   lang: string;
   interimResults: boolean;
   continuous: boolean;
-  onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+  onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal?: boolean }> }) => void) | null;
   onend: (() => void) | null;
-  onerror: (() => void) | null;
+  onerror: ((e: { error?: string }) => void) | null;
   start: () => void;
   stop: () => void;
+  abort: () => void;
 };
+
+// Hands-free: short things people say instead of tapping. Matched against the whole (trimmed) phrase.
+const SAY = {
+  next: ["next", "next step", "done", "i'm done", "im done", "all done", "finished", "got it", "did it", "i did it", "it's done", "its done", "that's done", "thats done", "check", "okay next"],
+  back: ["back", "go back", "previous", "previous step", "last step", "go back a step", "back one step", "step back", "go back one"],
+  repeat: ["repeat", "repeat that", "again", "say that again", "say it again", "what", "come again", "what did you say", "huh", "one more time"],
+  fix: ["fix it", "let's fix it", "lets fix it", "let's go", "lets go", "start", "yes", "yeah", "let's do it", "lets do it", "help me fix it", "fix it with ray", "okay let's go"],
+  look: ["look again", "scan again", "try again", "look", "scan"],
+  go: ["let's go", "lets go", "ready", "i'm ready", "im ready", "start", "go", "yes", "yeah", "let's do it", "lets do it", "okay let's go", "got it", "got everything"],
+};
+function said(raw: string, phrases: string[]): boolean {
+  const t = raw
+    .toLowerCase()
+    .replace(/[^a-z' ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^(ok|okay|alright|all right|hey ray|ray|so|um|uh)\s+/, "")
+    .replace(/\s+(please|ray|now|then)$/, "");
+  return phrases.includes(t);
+}
 
 const WATCH_EVERY_MS = 2500;
 const ORANGE = "#FF6B1A";
@@ -137,6 +158,15 @@ export default function CallPage() {
   const redoneRef = useRef<string[]>([]);
   const clearedRef = useRef<Set<number>>(new Set());
   const jobRef = useRef(0);
+  const handsFreeRef = useRef(true);
+  const earWantedRef = useRef(false);
+  const earRef = useRef<Recognition | null>(null);
+  const talkingRef = useRef(false);
+  const uttRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const onHeardRef = useRef<(text: string) => void>(() => {});
+  const pendingAsk = useRef<string | null>(null);
+  const voiceAt = useRef(0); // last time we heard the learner start talking
+  const tickRef = useRef<(userSaid: string | null) => void>(() => {});
   // Steps written ahead while they read the "What is this?" screen.
   const aheadRef = useRef<{ task: string; level: Level; steps: Promise<{ plan?: Plan; error?: string }> } | null>(null);
   const startedAt = useRef<number>(0);
@@ -160,6 +190,10 @@ export default function CallPage() {
   const [report, setReport] = useState<Report | null>(null);
   const [reportState, setReportState] = useState<"idle" | "loading" | "error">("idle");
   const [shared, setShared] = useState<string | null>(null);
+  // Hands-free, like a phone call: the mic opens whenever Ray stops talking.
+  const [handsFree, setHandsFree] = useState(true);
+  const [earOn, setEarOn] = useState(false);
+  const [heard, setHeard] = useState<string | null>(null);
   const [found, setFound] = useState<Identify | null>(null);
   const [looking, setLooking] = useState(false);
   const [snap, setSnap] = useState<{ src: string; w: number; h: number } | null>(null);
@@ -229,21 +263,87 @@ export default function CallPage() {
     return c.toDataURL("image/jpeg", 0.6).split(",")[1] ?? null;
   }, []);
 
+  // ── Voice in, hands-free (the mic is closed while Ray talks so he doesn't hear himself) ─
+  const stopEar = useCallback(() => {
+    const r = earRef.current;
+    earRef.current = null;
+    setEarOn(false);
+    try {
+      r?.abort();
+    } catch {}
+  }, []);
+
+  const startEar = useCallback(function start() {
+    if (!handsFreeRef.current || !earWantedRef.current || earRef.current || talkingRef.current) return;
+    const W = window as unknown as { SpeechRecognition?: new () => Recognition; webkitSpeechRecognition?: new () => Recognition };
+    const Ctor = W.SpeechRecognition ?? W.webkitSpeechRecognition;
+    if (!Ctor) return;
+    const r = new Ctor();
+    r.lang = "en-US";
+    r.interimResults = true;
+    r.continuous = false;
+    const opened = Date.now();
+    r.onresult = (e) => {
+      const results = Array.from(e.results);
+      voiceAt.current = Date.now();
+      if (!results.length || !results[results.length - 1].isFinal) return; // still talking
+      const text = results.map((x) => x[0].transcript).join(" ").trim();
+      if (text && !talkingRef.current) onHeardRef.current(text);
+    };
+    r.onerror = (e) => {
+      if (e?.error === "not-allowed" || e?.error === "service-not-allowed") {
+        handsFreeRef.current = false;
+        setHandsFree(false);
+      }
+    };
+    r.onend = () => {
+      if (earRef.current !== r) return;
+      earRef.current = null;
+      setEarOn(false);
+      // Reopen right away; back off if the browser keeps closing it instantly.
+      setTimeout(start, Date.now() - opened < 1000 ? 1500 : 250);
+    };
+    earRef.current = r;
+    setEarOn(true);
+    try {
+      r.start();
+    } catch {
+      earRef.current = null;
+      setEarOn(false);
+    }
+  }, []);
+
   // ── Voice out ─────────────────────────────────────────────────────────────
   const speak = useCallback((text: string) => {
     setCaption(text);
+    setHeard(null);
     recentRef.current = [...recentRef.current, text].slice(-4);
     if (typeof window === "undefined" || !window.speechSynthesis) return;
+    talkingRef.current = true;
+    stopEar();
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
+    uttRef.current = u;
+    const finish = () => {
+      if (uttRef.current !== u) return;
+      uttRef.current = null;
+      talkingRef.current = false;
+      setSpeaking(false);
+      setTimeout(startEar, 350);
+    };
+    // Some phones never fire onend: don't leave the mic closed forever.
+    setTimeout(() => {
+      if (uttRef.current === u && !window.speechSynthesis.speaking) finish();
+    }, 2500 + text.length * 90);
     u.rate = 1.03;
     const voices = window.speechSynthesis.getVoices();
     const v = voices.find((x) => /en-US/.test(x.lang) && /Daniel|Alex|Aaron|Fred|Google US English|Male/i.test(x.name)) ?? voices.find((x) => /en/.test(x.lang));
     if (v) u.voice = v;
     u.onstart = () => setSpeaking(true);
-    u.onend = () => setSpeaking(false);
+    u.onend = finish;
+    u.onerror = finish;
     window.speechSynthesis.speak(u);
-  }, []);
+  }, [stopEar, startEar]);
 
   // ── The game's moments ────────────────────────────────────────────────────
   const award = useCallback((amount: number, lines: string[]) => {
@@ -469,9 +569,15 @@ export default function CallPage() {
   // ── Watch loop ────────────────────────────────────────────────────────────
   const tick = useCallback(
     async (userSaid: string | null = null) => {
-      if (!plan || busy.current) return;
+      if (!plan) return;
+      if (busy.current) {
+        if (userSaid) pendingAsk.current = userSaid;
+        return;
+      }
       // Let Ray finish a sentence before looking again (a question always goes through).
       if (!userSaid && typeof window !== "undefined" && window.speechSynthesis?.speaking) return;
+      // ...and never talks over the learner.
+      if (!userSaid && Date.now() - voiceAt.current < 2500) return;
       busy.current = true;
       try {
         const res = await fetch("/api/watch", {
@@ -496,17 +602,34 @@ export default function CallPage() {
           setFlash("bad");
           cue("bad");
         }
-        if (w.say && (userSaid || !window.speechSynthesis?.speaking)) speak(w.say);
+        const theyreTalking = !userSaid && Date.now() - voiceAt.current < 2500;
+        if (w.say && !theyreTalking && (userSaid || !window.speechSynthesis?.speaking)) speak(w.say);
         else if (w.safety) speak(w.safety);
         if (w.stepDone) stepCleared(current, plan.steps.length);
       } catch {
         // The next tick tries again.
       } finally {
         busy.current = false;
+        const q = pendingAsk.current;
+        if (q) {
+          pendingAsk.current = null;
+          setTimeout(() => tickRef.current(q), 0);
+        }
       }
     },
     [plan, capture, task, level, current, teach, speak, stepCleared]
   );
+  useEffect(() => {
+    tickRef.current = tick;
+  }, [tick]);
+
+  // Done with a step (button or "next"): Ray says the next one right away.
+  const markDone = useCallback(() => {
+    if (!plan) return;
+    const next = plan.steps[current + 1];
+    stepCleared(current, plan.steps.length);
+    if (next) speak(`Nice. Step ${current + 2}: ${next.instruction}`);
+  }, [plan, current, stepCleared, speak]);
 
   useEffect(() => {
     if (phase !== "guiding") return;
@@ -610,6 +733,7 @@ export default function CallPage() {
         return;
       }
       window.speechSynthesis?.cancel();
+      stopEar();
       const r = new Ctor();
       r.lang = "en-US";
       r.interimResults = false;
@@ -627,13 +751,72 @@ export default function CallPage() {
           unlock("asked");
         }
       };
-      r.onend = () => setListening(false);
+      r.onend = () => {
+        setListening(false);
+        setTimeout(startEar, 300);
+      };
       r.onerror = () => setListening(false);
       setListening(true);
       r.start();
     },
-    [tick, unlock, lookAt]
+    [tick, unlock, lookAt, stopEar, startEar]
   );
+
+  // From "What is this?" straight into the job, with the gear list it already found.
+  const fixIt = useCallback(() => {
+    const m = found?.missions[0];
+    if (!found || !m) return;
+    setTask(m.task);
+    begin(m.task, { product: { name: found.name, model: null, serial: null }, trade: "", tools: found.tools });
+  }, [found, begin]);
+
+  // Hands-free is on for every screen after the first tap (the tap is what lets the browser open the mic).
+  useEffect(() => {
+    handsFreeRef.current = handsFree;
+    earWantedRef.current = handsFree && (phase === "identify" || phase === "loadout" || phase === "guiding" || phase === "done");
+    if (earWantedRef.current) startEar();
+    else stopEar();
+  }, [phase, handsFree, startEar, stopEar]);
+  useEffect(() => () => stopEar(), [stopEar]);
+  useEffect(() => {
+    if (!heard) return;
+    const id = setTimeout(() => setHeard(null), 6000);
+    return () => clearTimeout(id);
+  }, [heard]);
+
+  // What hands-free does with what it hears, on each screen.
+  useEffect(() => {
+    onHeardRef.current = (text: string) => {
+      setHeard(text);
+      if (phase === "guiding" && plan) {
+        if (said(text, SAY.next)) return markDone();
+        if (said(text, SAY.back)) return current > 0 ? goTo(current - 1) : speak("This is the first step.");
+        if (said(text, SAY.repeat)) {
+          const last = recentRef.current[recentRef.current.length - 1];
+          return last ? speak(last) : undefined;
+        }
+        questionsRef.current = [...questionsRef.current, text].slice(-12);
+        unlock("asked");
+        tick(text);
+        return;
+      }
+      if (phase === "identify" && found && !looking) {
+        if (said(text, SAY.fix)) return fixIt();
+        if (said(text, SAY.look)) return void lookAt();
+        if (said(text, SAY.repeat)) return speak(found.say);
+        setTask(text);
+        lookAt(text);
+        return;
+      }
+      if (phase === "loadout") {
+        if (said(text, SAY.go)) return plan ? go() : speak("Almost. I'm still mapping it out.");
+        return;
+      }
+      if (phase === "done" && report && /report|read|summary|what did i do/i.test(text)) {
+        speak(`${report.didWhat} To teach it: ${report.teachBack.join(" ")}`);
+      }
+    };
+  });
 
   // ── Pointing: map the coach's image coordinates onto the cover-fitted video ─
   const toScreen = (x: number, y: number) => {
@@ -694,7 +877,26 @@ export default function CallPage() {
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between text-sm">
             <span className="font-bold">Ray <span className="font-normal text-white/60">· journeyman{kit && !live ? " · practice" : ""}</span></span>
-            {phase === "guiding" && <span className="tabular-nums text-white/70">{mm}:{ss}</span>}
+            <span className="flex items-center gap-2">
+              {phase === "guiding" && <span className="tabular-nums text-white/70">{mm}:{ss}</span>}
+              {phase !== "setup" && phase !== "planning" && (
+                <button
+                  onClick={() => setHandsFree((h) => !h)}
+                  className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-extrabold ${!handsFree ? "bg-white/10 text-white/50" : earOn && !speaking ? "bg-[#22C55E] text-black" : "bg-white/15"}`}
+                  aria-label="Hands-free on or off"
+                >
+                  {!handsFree ? "🎧 Off" : earOn && !speaking ? (
+                    <>
+                      <span className="h-2 w-2 animate-pulse rounded-full bg-black" /> Listening
+                    </>
+                  ) : speaking ? (
+                    "🗣️ Ray"
+                  ) : (
+                    "🎧 Hands-free"
+                  )}
+                </button>
+              )}
+            </span>
           </div>
           <div className="mt-1 flex items-center gap-2">
             <span className="rounded-md bg-white/15 px-1.5 py-0.5 text-[11px] font-extrabold uppercase tracking-wide">{lvl.name}</span>
@@ -865,6 +1067,13 @@ export default function CallPage() {
         </div>
       )}
 
+      {/* What hands-free heard (on screens without the guiding caption) */}
+      {heard && phase !== "guiding" && phase !== "setup" && (
+        <div className="absolute inset-x-4 top-[5.25rem] z-10 flex justify-end">
+          <div className="max-w-[85%] animate-[rise_.3s_ease-out] rounded-2xl rounded-br-md bg-white px-4 py-2 text-sm font-semibold text-black shadow-xl">“{heard}”</div>
+        </div>
+      )}
+
       {/* IDENTIFY: labels on the parts, where to start */}
       {phase === "identify" && looking && (
         <>
@@ -937,16 +1146,13 @@ export default function CallPage() {
               </ol>
               {found.missions[0] && (
                 <button
-                  onClick={() => {
-                    const m = found.missions[0];
-                    setTask(m.task);
-                    begin(m.task, { product: { name: found.name, model: null, serial: null }, trade: "", tools: found.tools });
-                  }}
+                  onClick={fixIt}
                   className="mt-5 flex h-16 w-full items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#FF8A3D] to-[#FF3D6E] text-xl font-black shadow-[0_10px_40px_rgba(255,107,26,.5)] active:scale-[.98]"
                 >
                   📞 Fix it with Ray
                 </button>
               )}
+              {handsFree && found.missions[0] && <p className="mt-2 text-center text-xs text-white/45">Or just say “fix it”, or tell Ray what&apos;s wrong</p>}
             </>
           ) : (
             <p className="text-red-300">{error ?? "Ray couldn't make that out."}</p>
@@ -1021,6 +1227,7 @@ export default function CallPage() {
           </div>
           <div className="mt-3 text-center text-sm text-white/55">
             {gear.size}/{kit.tools.length} ready · +{10 * kit.tools.length} XP for gearing up
+            {handsFree && <div className="mt-1 text-white/45">Say “let&apos;s go” when you&apos;re ready</div>}
           </div>
           {plan ? (
             <button onClick={go} className="mt-5 h-16 w-full animate-[pop_.4s_ease-out] rounded-full bg-gradient-to-r from-[#FF8A3D] to-[#FF3D6E] text-xl font-black shadow-[0_10px_40px_rgba(255,107,26,.5)] active:scale-[.98]">
@@ -1042,6 +1249,7 @@ export default function CallPage() {
       {/* GUIDING */}
       {phase === "guiding" && plan && step && (
         <div className="absolute inset-x-0 bottom-0 p-5 pb-7">
+          {heard && !speaking && <div className="mb-3 ml-auto w-fit max-w-[85%] animate-[rise_.3s_ease-out] rounded-2xl rounded-br-md bg-white px-4 py-2 text-base font-semibold text-black">“{heard}”</div>}
           {caption && speaking && <div className="mb-3 line-clamp-2 rounded-2xl bg-black/60 px-4 py-2 text-base leading-snug text-white/95 backdrop-blur">{caption}</div>}
           <div className="flex items-center gap-4">
             <div
@@ -1079,12 +1287,12 @@ export default function CallPage() {
             <button onClick={() => listen("ask")} className={`col-span-2 grid h-20 place-items-center rounded-3xl text-3xl active:scale-95 ${listening ? "bg-[#FF6B1A] animate-pulse" : "bg-white text-black"}`} aria-label="Ask Ray">
               {listening ? "👂" : "🎙️"}
             </button>
-            <button onClick={() => stepCleared(current, plan.steps.length)} className="grid h-20 place-items-center rounded-3xl bg-[#22C55E] text-3xl shadow-[0_8px_24px_rgba(34,197,94,.45)] active:scale-95" aria-label="Done with this step">
+            <button onClick={markDone} className="grid h-20 place-items-center rounded-3xl bg-[#22C55E] text-3xl shadow-[0_8px_24px_rgba(34,197,94,.45)] active:scale-95" aria-label="Done with this step">
               ✓
             </button>
           </div>
           <button onClick={() => setShowSteps(true)} className="mt-3 w-full text-center text-sm text-white/55">
-            Mission map · tap any step to jump
+            {handsFree ? "🎙️ Just talk: “next”, “back”, “repeat”, or ask · Map" : "Mission map · tap any step to jump"}
           </button>
         </div>
       )}
