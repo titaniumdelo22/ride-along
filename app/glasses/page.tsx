@@ -104,7 +104,35 @@ export default function GlassesPage() {
     return c.toDataURL("image/jpeg", q).split(",")[1] ?? null;
   }, []);
 
-  const merge = useCallback((boxes: OverlayPart[]) => {
+  // Steady labels: a part that vanishes for ONE detection stays on screen (no flicker); a part whose box
+  // moved a little slides to the new spot instead of jumping; a brand-new part must be seen twice before it shows.
+  const history = useRef<Map<string, { box: [number, number, number, number]; hits: number; misses: number }>>(new Map());
+  const stabilize = useCallback((fresh: OverlayPart[]): OverlayPart[] => {
+    const h = history.current;
+    const seenNow = new Set(fresh.map((p) => p.label));
+    for (const p of fresh) {
+      const e = h.get(p.label);
+      if (!e) h.set(p.label, { box: p.box, hits: 1, misses: 0 });
+      else {
+        const k = 0.6; // move 60% of the way toward the new box each detection
+        e.box = e.box.map((v, i) => v + (p.box[i] - v) * k) as [number, number, number, number];
+        e.hits++; e.misses = 0;
+      }
+    }
+    for (const [label, e] of h) {
+      if (!seenNow.has(label)) { e.misses++; if (e.misses > 1) h.delete(label); }
+    }
+    const out: OverlayPart[] = [];
+    for (const [label, e] of h) {
+      if (e.hits < 2) continue; // need two sightings before it appears
+      const def = byLabel(label);
+      if (def) out.push({ label, color: def.color, box: e.box });
+    }
+    return out;
+  }, []);
+
+  const merge = useCallback((boxesRaw: OverlayPart[]) => {
+    const boxes = stabilize(boxesRaw);
     const now = Date.now();
     const out = boxes.map((b) => {
       const m = masks.current.get(b.label);
@@ -121,7 +149,7 @@ export default function GlassesPage() {
       out.forEach((p) => n.add(p.label));
       return n;
     });
-  }, []);
+  }, [stabilize]);
 
   // motion loop: keep labels glued to the parts between detections
   useEffect(() => {
