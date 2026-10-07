@@ -17,6 +17,9 @@ export default function Home() {
         <Link href="/call" className="mt-8 flex h-16 items-center justify-center rounded-full bg-[#FF6B1A] text-xl font-bold">
           Call my pro
         </Link>
+        <Link href="/glasses" className="mt-3 flex h-14 items-center justify-center rounded-full border border-white/25 text-lg font-bold">
+          Put on the glasses
+        </Link>
         <ul className="mt-10 space-y-4 text-white/85">
           <li><b className="text-white">Sees your work.</b> It checks each step on camera before moving on.</li>
           <li><b className="text-white">Teaches, not just tells.</b> Teach mode asks what comes next and why.</li>

@@ -133,7 +133,9 @@ export default function GlassesPage() {
         t.step(v);
         if (trackingRef.current) {
           // Picture moved right by dx => the part is now further right on screen => shift labels by +dx.
-          setDrift({ dx: t.total.x - captureTotal.current.x, dy: t.total.y - captureTotal.current.y });
+          const d = { dx: t.total.x - captureTotal.current.x, dy: t.total.y - captureTotal.current.y };
+          setDrift(d);
+          (window as unknown as { __glasses?: object }).__glasses = { drift: d, total: { ...t.total }, lost: t.lost };
         } else setDrift({ dx: 0, dy: 0 });
       }
       raf = requestAnimationFrame(tick);
