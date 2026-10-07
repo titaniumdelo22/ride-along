@@ -87,7 +87,7 @@ export default function ScanDrawer(p: Props) {
             {p.planning ? "Ray is looking…" : "Make a plan"}
           </button>
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {["Nothing turns on", "COLD light is off, water is warm", "No hot water", "A wire came loose inside"].map((q) => (
+            {["Nothing turns on", "COLD light is off, water is warm", "No hot water", "Leaking"].map((q) => (
               <button type="button" key={q} onClick={() => setProblem(q)} className="rounded-full bg-white/10 px-3 py-1 text-xs">{q}</button>
             ))}
           </div>

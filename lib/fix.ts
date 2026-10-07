@@ -48,11 +48,7 @@ How this unit is laid out (the back cover is already removed for the demo, so th
 - Top: round white cold tank with a gray foam lid, clear water inlet tube.
 - Inside the back: compressor (black dome) with its relay box, filter dryer and coiled capillary tube in copper, black foam-wrapped hot tank, a gray terminal block with three screws on the floor where the green ground wire and white wires are held, a harness of red/yellow/white/brown wires with spade connectors, red rocker hot water switch, data plate, power cord. Condenser coils are the black grid on the back.
 
-Common faults on this unit, most likely first:
-1. A wire backed out from under a terminal block screw, or a spade connector pulled off the relay or heater: that circuit is dead (no COLD light / no HOT light / nothing at all). Fix: unplug, find the loose wire, seat it under its screw or push the connector fully on, tighten, plug in, watch the light.
-2. Dusty condenser coils: water never gets cold. Fix: unplug, brush the coils, leave air space behind the unit.
-3. Hot water switch off: no hot water. Fix: flip it on.
-4. Loose tap body or gasket: dribbles from the tap base.
+Diagnose from what the learner tells you and what you can see in the camera. Do not assume a cause; ask them to show you things and reason like a technician.
 
 Known parts of this machine (use these exact names when you refer to them):
 ${PARTS_DESC}`;
