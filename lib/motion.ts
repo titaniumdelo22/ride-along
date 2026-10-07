@@ -15,6 +15,8 @@ export class MotionTracker {
   /** Accumulated shift since start, in fractions of frame width/height. */
   total = { x: 0, y: 0 };
   lost = false;
+  /** Shift found on the latest frame (fractions of the frame). */
+  lastStep = { x: 0, y: 0 };
 
   constructor() {
     this.canvas = document.createElement("canvas");
@@ -63,6 +65,7 @@ export class MotionTracker {
     }
     this.total.x += dx;
     this.total.y += dy;
+    this.lastStep = { x: dx, y: dy };
     return { dx, dy };
   }
 }

@@ -33,6 +33,7 @@ export default function GlassesPage() {
   const [drift, setDrift] = useState({ dx: 0, dy: 0 });
   const [moving, setMoving] = useState(false);
   const movedSinceRef = useRef(false);
+  const speedRef = useRef(0);
   const [tracking, setTracking] = useState(false);
   const trackingRef = useRef(tracking);
   trackingRef.current = tracking;
@@ -226,9 +227,10 @@ export default function GlassesPage() {
       const v = videoRef.current, t = tracker.current;
       if (v && t && v.readyState >= 2 && !pausedRef.current) {
         t.step(v);
-        // how far the picture moved since the frame the labels came from
-        const mx = t.total.x - captureTotal.current.x, my = t.total.y - captureTotal.current.y;
-        const far = Math.hypot(mx, my) > 0.05 || t.lost;
+        // Hide labels only during a real fast pan: average speed over the last ~10 frames, not accumulated shake.
+        const sp = Math.hypot(t.lastStep.x, t.lastStep.y);
+        speedRef.current = speedRef.current * 0.85 + sp * 0.15;
+        const far = speedRef.current > 0.012;
         setMoving((m) => (m === far ? m : far));
         if (far) movedSinceRef.current = true;
         if (trackingRef.current) {

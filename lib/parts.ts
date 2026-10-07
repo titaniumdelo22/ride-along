@@ -28,4 +28,4 @@ export const PARTS: PartDef[] = [
 ];
 
 export const LABELS = PARTS.map((p) => p.label);
-export const byLabel = (label: string) => PARTS.find((p) => p.label === label.trim().toLowerCase());
+export const byLabel = (label: string) => PARTS.find((p) => p.label === label.trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " "));

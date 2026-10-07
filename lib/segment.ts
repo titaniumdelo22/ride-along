@@ -10,12 +10,13 @@ import { LABELS, PARTS, byLabel } from "./parts";
 export type Part = { label: string; color: string; box: [number, number, number, number]; mask?: string | null };
 
 const KEY = () => process.env.GEMINI_API_KEY || "";
-export const BOX_MODEL = process.env.BOX_MODEL || "gemini-3.1-flash-lite";
+export const BOX_MODEL = process.env.BOX_MODEL || "gemini-3.5-flash";
 export const MASK_MODEL = process.env.MASK_MODEL || "gemini-3.8-flash";
 
 const LIST = PARTS.map((p) => `"${p.label}" (${p.hint})`).join("; ");
 
 function thinking(model: string) {
+  if (model === BOX_MODEL) return model.startsWith("gemini-3") ? { thinkingLevel: "minimal" } : { thinkingBudget: 0 };
   return model.startsWith("gemini-3") ? { thinkingLevel: process.env.THINK_LEVEL || "low" } : { thinkingBudget: 0 };
 }
 
