@@ -74,7 +74,8 @@ export default function GlassesPage() {
   useEffect(() => {
     (async () => {
       if (await startCamera()) return;
-      const isPhone = /iPhone|iPad|Android/i.test(navigator.userAgent) || navigator.maxTouchPoints > 1;
+      const forcedStill = new URLSearchParams(window.location.search).get("still");
+      const isPhone = !forcedStill && (/iPhone|iPad|Android/i.test(navigator.userAgent) || navigator.maxTouchPoints > 1);
       if (isPhone) {
         // iPhone Safari sometimes wants a tap before it hands over the camera. Ask for one instead of guessing.
         setNeedTap(true);
