@@ -45,8 +45,11 @@ export default function GlassesOverlay(props: Props) {
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
       const c = ref.current;
-      const { parts, view, drift, selected, focus, anomalies = [] } = p.current;
-      if (!c || !view.vw || !view.vh) return;
+      const { parts, drift, selected, focus, anomalies = [] } = p.current;
+      const vid = document.querySelector("video");
+      const view = { ...p.current.view, vw: p.current.view.vw || vid?.videoWidth || 0, vh: p.current.view.vh || vid?.videoHeight || 0 };
+      if (c && c.parentElement) { view.w = c.parentElement.clientWidth || view.w; view.h = c.parentElement.clientHeight || view.h; }
+      if (!c || !view.vw || !view.vh || !view.w) return;
 
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       if (c.width !== Math.round(view.w * dpr) || c.height !== Math.round(view.h * dpr)) {
@@ -140,8 +143,7 @@ export default function GlassesOverlay(props: Props) {
   return (
     <canvas
       ref={ref}
-      style={{ width: props.view.w, height: props.view.h }}
-      className="absolute inset-0"
+      className="absolute inset-0 h-full w-full"
       onClick={(e) => {
         const { parts, view, onTap } = p.current;
         if (!onTap) return;

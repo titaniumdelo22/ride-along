@@ -5,7 +5,7 @@ import ConditionBanner from "@/components/ConditionBanner";
 import GlassesOverlay, { type OverlayPart, type OverlayAnomaly } from "@/components/GlassesOverlay";
 import { PARTS, byLabel } from "@/lib/parts";
 import { MotionTracker } from "@/lib/motion";
-import { speak as sayAloud, isSpeaking, stopSpeaking, unlockAudio } from "@/lib/voice";
+import { speak as sayAloud, isSpeaking, stopSpeaking, unlockAudio, voiceUnlocked } from "@/lib/voice";
 import ScanDrawer, { type Mode, type FixPhase } from "@/components/ScanDrawer";
 import type { FixPlan, FixWatch, Replan, Intake } from "@/lib/fix";
 
@@ -21,6 +21,7 @@ export default function GlassesPage() {
   const masks = useRef<Map<string, { mask: string; box: [number, number, number, number]; at: number }>>(new Map());
   const [status, setStatus] = useState("Starting camera…");
   const [ms, setMs] = useState<{ box: number; mask: number }>({ box: 0, mask: 0 });
+  const [rawCount, setRawCount] = useState(0);
   const [useMasks, setUseMasks] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [seen, setSeen] = useState<Set<string>>(new Set());
@@ -127,6 +128,15 @@ export default function GlassesPage() {
     })();
     return () => streamRef.current?.getTracks().forEach((t) => t.stop());
   }, [startCamera]);
+
+  // iPhone: if the camera video ended up paused, any tap restarts it
+  useEffect(() => {
+    const kick = () => { const v = videoRef.current; if (v && v.srcObject && v.paused) v.play().catch(() => {}); };
+    window.addEventListener("touchend", kick, { passive: true });
+    window.addEventListener("click", kick);
+    const iv = setInterval(() => { const v = videoRef.current; if (v && v.srcObject && v.paused) v.play().catch(() => {}); }, 1500);
+    return () => { window.removeEventListener("touchend", kick); window.removeEventListener("click", kick); clearInterval(iv); };
+  }, []);
 
   // size
   useEffect(() => {
@@ -237,6 +247,7 @@ export default function GlassesPage() {
           const j = (await res.json()) as { parts?: OverlayPart[]; error?: string };
           if (j.error) throw new Error(j.error);
           lastBoxes = j.parts ?? [];
+          setRawCount(lastBoxes.length);
           captureTotal.current = pendingTotal.current;
           merge(lastBoxes);
           setMs((m) => ({ ...m, box: Date.now() - t0 }));
@@ -436,7 +447,7 @@ export default function GlassesPage() {
     <main className="h-dvh w-screen bg-black text-white overflow-hidden relative select-none">
       <div ref={wrapRef} className="absolute inset-0">
         <video ref={videoRef} playsInline muted className="h-full w-full object-cover" />
-        {view.w > 0 && <GlassesOverlay parts={visibleParts} view={view} drift={drift} selected={mode === "fix" ? null : selected} focus={stepParts} anomalies={mode === "fix" ? anomalies : []} onTap={onTap} />}
+        {<GlassesOverlay parts={visibleParts} view={view} drift={drift} selected={mode === "fix" ? null : selected} focus={stepParts} anomalies={mode === "fix" ? anomalies : []} onTap={onTap} />}
       </div>
 
       {/* Is it put back together? (Ray's check, from the same camera) */}
@@ -446,7 +457,9 @@ export default function GlassesPage() {
       <div className="absolute top-0 inset-x-0 p-3 flex items-center gap-2 bg-gradient-to-b from-black/70 to-transparent">
         <Link href="/" className="text-lg font-extrabold tracking-tight">ride<span className="text-[#FF6B1A]">along</span></Link>
         <span className="ml-2 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold backdrop-blur">LIVE SCAN</span>
-        <span className="ml-auto text-xs text-white/80">{looking ? "Ray is looking…" : status}</span>
+        <span className="ml-auto text-right text-xs text-white/80">{looking ? "Ray is looking…" : status}
+          <span className="block text-[10px] text-white/45 tabular-nums">cam {videoRef.current?.videoWidth ?? 0}×{videoRef.current?.videoHeight ?? 0}{videoRef.current?.paused ? " paused" : ""} · det {ms.box ? (ms.box / 1000).toFixed(1) + "s" : "–"} · {rawCount} found · voice {voiceUnlocked() ? "on" : "tap"}</span>
+        </span>
       </div>
 
       {/* small controls, top right under the status */}

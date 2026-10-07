@@ -10,7 +10,7 @@ let speakingFlag = false;
 let seq = 0;
 
 // 0.1 s of silence, used to unlock the audio element inside a user gesture.
-const SILENT = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=";
+const SILENT = "/silence.wav";
 
 function el(): HTMLAudioElement {
   if (!audio) {
@@ -31,10 +31,13 @@ export function unlockAudio() {
 }
 
 if (typeof window !== "undefined") {
-  const once = () => { unlockAudio(); };
-  window.addEventListener("touchend", once, { once: true, passive: true });
-  window.addEventListener("click", once, { once: true });
+  // keep trying on every tap until it's unlocked (some taps don't count as a gesture on iOS)
+  const tryUnlock = () => { if (!unlocked) unlockAudio(); };
+  window.addEventListener("touchend", tryUnlock, { passive: true });
+  window.addEventListener("click", tryUnlock);
 }
+
+export function voiceUnlocked() { return unlocked; }
 
 export function isSpeaking(): boolean {
   return speakingFlag || (typeof window !== "undefined" && !!window.speechSynthesis?.speaking);
