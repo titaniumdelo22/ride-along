@@ -31,7 +31,9 @@ export default function GlassesPage() {
   const captureTotal = useRef({ x: 0, y: 0 }); // tracker.total at the moment the last *applied* detection frame was grabbed
   const pendingTotal = useRef({ x: 0, y: 0 }); // tracker.total when the in-flight frame was grabbed
   const [drift, setDrift] = useState({ dx: 0, dy: 0 });
-  const [tracking, setTracking] = useState(true);
+  const [moving, setMoving] = useState(false);
+  const movedSinceRef = useRef(false);
+  const [tracking, setTracking] = useState(false);
   const trackingRef = useRef(tracking);
   trackingRef.current = tracking;
   // drawer modes
@@ -51,6 +53,7 @@ export default function GlassesPage() {
   const [intake, setIntake] = useState<Intake | null>(null);
   const photosRef = useRef<string[]>([]);
   const notesRef = useRef<string[]>([]);
+  const askedRef = useRef<string[]>([]); // survey areas already photographed
   const [shots, setShots] = useState(0);
   const [listening, setListening] = useState(false);
   const modeRef = useRef(mode); modeRef.current = mode;
@@ -168,6 +171,7 @@ export default function GlassesPage() {
   const history = useRef<Map<string, { box: [number, number, number, number]; hits: number; misses: number }>>(new Map());
   const stabilize = useCallback((fresh: OverlayPart[]): OverlayPart[] => {
     const h = history.current;
+    if (movedSinceRef.current) { h.clear(); movedSinceRef.current = false; }
     const seenNow = new Set(fresh.map((p) => p.label));
     for (const p of fresh) {
       const e = h.get(p.label);
@@ -183,7 +187,7 @@ export default function GlassesPage() {
     }
     const out: OverlayPart[] = [];
     for (const [label, e] of h) {
-      if (e.hits < 2) continue; // need two sightings before it appears
+      if (e.hits < 1) continue;
       const def = byLabel(label);
       if (def) out.push({ label, color: def.color, box: e.box });
     }
@@ -218,6 +222,11 @@ export default function GlassesPage() {
       const v = videoRef.current, t = tracker.current;
       if (v && t && v.readyState >= 2 && !pausedRef.current) {
         t.step(v);
+        // how far the picture moved since the frame the labels came from
+        const mx = t.total.x - captureTotal.current.x, my = t.total.y - captureTotal.current.y;
+        const far = Math.hypot(mx, my) > 0.05 || t.lost;
+        setMoving((m) => (m === far ? m : far));
+        if (far) movedSinceRef.current = true;
         if (trackingRef.current) {
           // Picture moved right by dx => the part is now further right on screen => shift labels by +dx.
           const d = { dx: t.total.x - captureTotal.current.x, dy: t.total.y - captureTotal.current.y };
@@ -330,7 +339,7 @@ export default function GlassesPage() {
         const said = userSaidRef.current; userSaidRef.current = null;
         setLooking(true);
         try {
-          const res = await fetch("/api/fix", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: "watch", frame, problem: problemRef.current, plan: pl, current: idx, history: historyRef.current, userSaid: said }) });
+          const res = await fetch("/api/fix", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: "watch", frame, problem: problemRef.current, plan: pl, current: idx, history: historyRef.current, userSaid: said, done: pl.steps.slice(0, idx).map((st) => st.title) }) });
           const w = (await res.json()) as FixWatch & { error?: string };
           if (w.error) continue;
           historyRef.current = [...historyRef.current, w.see].slice(-6);
@@ -341,7 +350,7 @@ export default function GlassesPage() {
             setLastSay(`I see ${w.anomalies.map((an) => an.issue).join(", and ")}. Let me think about what to do.`);
             speak(`I see ${w.anomalies.map((an) => an.issue).join(", and ")}. Give me a second.`);
             try {
-              const r2 = await fetch("/api/fix", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: "replan", frame, problem: problemRef.current, plan: pl, current: idx, history: historyRef.current, anomalies: w.anomalies }) });
+              const r2 = await fetch("/api/fix", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: "replan", frame, problem: problemRef.current, plan: pl, current: idx, history: historyRef.current, anomalies: w.anomalies, done: pl.steps.slice(0, idx + 1).map((st) => st.title) }) });
               const rp = (await r2.json()) as Replan & { error?: string };
               if (!rp.error && rp.remainingSteps.length && stepRef.current === idx) {
                 setPlan({ ...pl, steps: [...pl.steps.slice(0, idx + 1), ...rp.remainingSteps] });
@@ -366,7 +375,7 @@ export default function GlassesPage() {
 
   const resetFix = () => {
     setPlan(null); setStepIndex(0); setSelected(null); setAnomalies([]); setIntake(null);
-    historyRef.current = []; photosRef.current = []; notesRef.current = []; setShots(0);
+    historyRef.current = []; photosRef.current = []; notesRef.current = []; askedRef.current = []; setShots(0);
     setFixPhase("idle");
   };
   const onStartFix = () => { resetFix(); setFixPhase("problem"); speak("Tell me what's going on with it."); };
@@ -375,7 +384,7 @@ export default function GlassesPage() {
   const onProblem = async (text: string) => {
     setProblem(text); setPlanning(true); setErr(null);
     try {
-      const res = await fetch("/api/fix", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: "intake", problem: text, photos: [] }) });
+      const res = await fetch("/api/fix", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: "intake", problem: text, photos: [], asked: [] }) });
       const it = (await res.json()) as Intake & { error?: string };
       if (it.error) throw new Error(it.error);
       setIntake(it); setFixPhase("shots");
@@ -389,10 +398,11 @@ export default function GlassesPage() {
     const frame = grab(1024, 0.8);
     if (!frame) return;
     photosRef.current = [...photosRef.current, frame];
+    askedRef.current = [...askedRef.current, intake?.nextShot?.title ?? `view ${photosRef.current.length}`];
     setShots(photosRef.current.length);
     setPlanning(true); setErr(null);
     try {
-      const res = await fetch("/api/fix", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: "intake", problem: problemRef.current, photos: photosRef.current }) });
+      const res = await fetch("/api/fix", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: "intake", problem: problemRef.current, photos: photosRef.current, asked: askedRef.current }) });
       const it = (await res.json()) as Intake & { error?: string };
       if (it.error) throw new Error(it.error);
       notesRef.current = [...notesRef.current, it.observations];
@@ -440,14 +450,15 @@ export default function GlassesPage() {
   // What gets drawn: in Fix mode only the current step's parts; with a selection only that part; otherwise everything.
   const stepParts = mode === "fix" && plan ? new Set(plan.steps[stepIndex]?.parts ?? []) : null;
   const intakeOn = mode === "fix" && fixPhase !== "steps" && fixPhase !== "idle";
-  const visibleParts = intakeOn ? [] : selected && mode !== "fix" ? parts.filter((p) => p.label === selected) : parts;
+  const shotParts = intakeOn && fixPhase === "shots" ? new Set(intake?.nextShot?.parts ?? []) : null;
+  const visibleParts = intakeOn ? (shotParts && shotParts.size ? parts.filter((p) => shotParts.has(p.label)) : []) : selected && mode !== "fix" ? parts.filter((p) => p.label === selected) : parts;
   const inView = new Set(parts.map((p) => p.label));
 
   return (
     <main className="h-dvh w-screen bg-black text-white overflow-hidden relative select-none">
       <div ref={wrapRef} className="absolute inset-0">
         <video ref={videoRef} playsInline muted className="h-full w-full object-cover" />
-        {<GlassesOverlay parts={visibleParts} view={view} drift={drift} selected={mode === "fix" ? null : selected} focus={stepParts} anomalies={mode === "fix" ? anomalies : []} onTap={onTap} />}
+        {<GlassesOverlay parts={moving ? [] : visibleParts} view={view} drift={drift} selected={mode === "fix" ? null : selected} focus={stepParts} anomalies={mode === "fix" ? anomalies : []} onTap={onTap} />}
       </div>
 
       {/* Is it put back together? (Ray's check, from the same camera) */}

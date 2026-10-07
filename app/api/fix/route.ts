@@ -7,19 +7,19 @@ import { planFix, watchFix, replanFix, intakeNext, type WatchContext, type Anoma
  */
 export async function POST(req: Request) {
   try {
-    const b = (await req.json()) as { mode: string; problem?: string; frame?: string | null; photos?: string[]; notes?: string[]; anomalies?: Anomaly[] } & Partial<WatchContext>;
-    if (b.mode === "intake") return Response.json(await intakeNext(String(b.problem ?? "").slice(0, 400), Array.isArray(b.photos) ? b.photos.slice(0, 5) : [], 4));
+    const b = (await req.json()) as { mode: string; problem?: string; frame?: string | null; photos?: string[]; notes?: string[]; asked?: string[]; done?: string[]; anomalies?: Anomaly[] } & Partial<WatchContext>;
+    if (b.mode === "intake") return Response.json(await intakeNext(String(b.problem ?? "").slice(0, 400), Array.isArray(b.photos) ? b.photos.slice(0, 5) : [], 4, Array.isArray(b.asked) ? b.asked.map(String) : []));
     if (b.mode === "plan") return Response.json(await planFix(String(b.problem ?? "").slice(0, 400), b.frame ?? null, Array.isArray(b.photos) ? b.photos.slice(0, 5) : [], Array.isArray(b.notes) ? b.notes.map(String) : []));
     if (b.mode === "watch" && b.frame && b.plan) {
       return Response.json(await watchFix(b.frame, {
         problem: String(b.problem ?? ""), plan: b.plan, current: Number(b.current) || 0,
-        history: Array.isArray(b.history) ? b.history.slice(-6).map(String) : [], userSaid: b.userSaid ?? null,
+        history: Array.isArray(b.history) ? b.history.slice(-6).map(String) : [], userSaid: b.userSaid ?? null, done: Array.isArray(b.done) ? b.done.map(String) : [],
       }));
     }
     if (b.mode === "replan" && b.frame && b.plan) {
       return Response.json(await replanFix(b.frame, {
         problem: String(b.problem ?? ""), plan: b.plan, current: Number(b.current) || 0,
-        history: Array.isArray(b.history) ? b.history.slice(-6).map(String) : [], userSaid: null,
+        history: Array.isArray(b.history) ? b.history.slice(-6).map(String) : [], userSaid: null, done: Array.isArray(b.done) ? b.done.map(String) : [],
       }, Array.isArray(b.anomalies) ? b.anomalies : []));
     }
     return Response.json({ error: "bad request" }, { status: 400 });

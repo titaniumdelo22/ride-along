@@ -12,6 +12,16 @@ import { referenceSet } from "./reference";
  *   watchFix(frame, step)    - a quick look at the newest frame: is this step done? what to say?
  */
 
+/** The areas a technician surveys on this unit, in a sensible order. Intake walks through these, never repeating one. */
+export const SURVEY: { area: string; ask: string; parts: string[] }[] = [
+  { area: "front lights", ask: "Hold the phone about 30 cm from the front so I can see the HOT and COLD lights and both taps.", parts: ["indicator lights", "hot water tap", "cold water tap"] },
+  { area: "terminal block", ask: "Through the side opening, hold the phone about 15 to 20 cm from the gray terminal block on the floor so I can see all three screws and every wire on them.", parts: ["terminal block", "wiring harness"] },
+  { area: "compressor relay", ask: "Point the phone at the black relay box on the side of the compressor, about 15 cm away, so I can see each wire going into it.", parts: ["compressor relay", "compressor", "wiring harness"] },
+  { area: "harness and connectors", ask: "Follow the bundle of red, yellow, white and brown wires across the inside, about 20 cm away, so I can see every connector along it.", parts: ["wiring harness", "terminal block"] },
+  { area: "hot water switch and back", ask: "Show me the back: the red hot water switch and the data plate, about 30 cm away.", parts: ["hot water switch", "data plate", "condenser coils", "power cord"] },
+  { area: "top tank", ask: "Show me the top of the machine: the cold tank lid and the water inlet tube.", parts: ["cold tank", "water inlet tube"] },
+];
+
 export const PLAN_MODEL = process.env.PLAN_MODEL || "claude-fable-5-1";
 export const WATCH_MODEL = process.env.WATCH_MODEL || "claude-opus-5-5";
 
@@ -60,6 +70,7 @@ How this unit is laid out (the back cover is already removed for the demo, so th
 Diagnose from what the learner tells you and what you can see in the camera. Do not assume a cause; ask them to show you things and reason like a technician.
 The learner may ask for a repair ("cold light is off"), a check ("is everything connected right?") or a job ("I want to clean this up", "show me how the wiring works"). Plan for what they asked.
 Compare the live view to the REFERENCE photos of this exact unit whenever you have them: point out any difference you can clearly see and build the steps around it.
+Power: the learner has been told to plug the unit in. Treat it as plugged in unless the camera clearly shows the plug out. Never ask about the plug or the outlet more than once in a whole session, and never as a repeated step.
 Rules for steps:
 - The back cover is off, so steps must send the camera INSIDE: close on the terminal block, the relay, each connector, the switch. "Hold the phone about 20 cm from the terminal block so I can see all three screws" is a good instruction; "show me the back" is not.
 - Each instruction names the exact part and what CORRECT looks like, so the learner can compare.
@@ -99,15 +110,19 @@ export const Intake = z.object({
 });
 export type Intake = z.infer<typeof Intake>;
 
-/** Guided intake: given the problem and the photos so far, decide what to look at next. Fast model. */
-export async function intakeNext(problem: string, photos: string[], maxShots: number): Promise<Intake> {
+/** Guided intake: walk through the survey areas one at a time, never repeating one. Fast model picks and describes. */
+export async function intakeNext(problem: string, photos: string[], maxShots: number, asked: string[] = []): Promise<Intake> {
+  const remaining = SURVEY.filter((sv) => !asked.includes(sv.area));
   const content: Anthropic.ContentBlockParam[] = [...referenceBlocks("all")];
-  photos.forEach((f, i) => { content.push({ type: "text", text: `Live photo ${i + 1}:` }); content.push(img(f)); });
+  photos.forEach((f, i) => { content.push({ type: "text", text: `Live photo ${i + 1} (${asked[i] ?? "view"}):` }); content.push(img(f)); });
   content.push({
     type: "text",
-    text: `The learner says: "${problem}".
-${photos.length ? `You have ${photos.length} live photo(s) above. Compare them to the reference photos.` : "You have no photos yet. Ask for the first one: a clear overall view of the side of the machine with the problem."}
-You may ask for at most ${maxShots} photos in total. Think like a technician arriving on site: what do you need to SEE to diagnose this? The back cover is already off, so the inside (terminal block, relay, connectors, harness, switch) is reachable with a close shot. Ask for one specific view at a time. When you can diagnose, say enough.`,
+    text: `The learner wants: "${problem}".
+Areas already photographed: ${asked.length ? asked.join(", ") : "none"}.
+Areas still available, in order: ${remaining.map((r) => `"${r.area}"`).join(", ") || "none"}.
+${photos.length ? `Compare the live photo(s) to the reference photos and say what you noticed in 'observations'.` : ""}
+Pick the NEXT area from the still-available list that will help most with what they want. Never pick an area already photographed. Put the area name exactly as listed in nextShot.title.
+Say enough=true only when you have seen at least the terminal block and the compressor relay, or when no areas remain.`,
   });
   const res = await anthropic().messages.parse({
     model: WATCH_MODEL,
@@ -118,8 +133,14 @@ You may ask for at most ${maxShots} photos in total. Think like a technician arr
   });
   if (!res.parsed_output) throw new Error("no intake");
   const it = res.parsed_output;
-  if (photos.length >= maxShots) { it.enough = true; it.nextShot = null; }
-  if (it.nextShot) it.nextShot.parts = it.nextShot.parts.map((p) => p.toLowerCase().trim()).filter((p) => LABELS.includes(p));
+  const done = photos.length >= maxShots || remaining.length === 0;
+  if (done) { it.enough = true; it.nextShot = null; return it; }
+  // enforce: next shot must be a not-yet-asked survey area; fall back to the next one in order
+  const pick = remaining.find((r) => it.nextShot && r.area.toLowerCase() === it.nextShot.title.toLowerCase().trim())
+    ?? (it.enough && asked.includes("terminal block") && asked.includes("compressor relay") ? null : remaining[0]);
+  if (!pick) { it.enough = true; it.nextShot = null; return it; }
+  it.enough = false;
+  it.nextShot = { title: pick.area, instruction: it.nextShot && it.nextShot.title.toLowerCase().trim() === pick.area ? it.nextShot.instruction : pick.ask, parts: pick.parts };
   return it;
 }
 
@@ -133,7 +154,7 @@ export async function planFix(problem: string, frame: string | null, photos: str
 ${all.length ? `The ${all.length} photo(s) above show the machine right now from the views you asked for. Use everything you can see: individual wires, which screw or tab each one goes to, connectors, switch position, lights.` : ""}
 ${notes.length ? `Your notes while gathering photos:
 ${notes.map((n) => `- ${n}`).join("\n")}` : ""}
-Diagnose the most likely cause and write the step-by-step repair a journeyman would walk them through. Each step is one physical action with what you will check on camera, and lists the parts involved using only the known part names.`,
+Diagnose the most likely cause and write the step-by-step job a journeyman would walk them through. At most ONE step about power/the plug, and only first. Every other step must be a different place or action, mostly inside the machine. Each step is one physical action with what you will check on camera, and lists the parts involved using only the known part names.`,
   });
   const res = await anthropic().messages.parse({
     model: PLAN_MODEL,
@@ -154,6 +175,7 @@ export type WatchContext = {
   current: number;
   history: string[]; // what you observed on previous looks, oldest first
   userSaid: string | null;
+  done?: string[]; // titles of steps the learner already finished
 };
 
 export async function watchFix(frame: string, ctx: WatchContext): Promise<FixWatch> {
@@ -166,6 +188,7 @@ export async function watchFix(frame: string, ctx: WatchContext): Promise<FixWat
     messages: [{ role: "user", content: [...referenceBlocks("inside"), { type: "text", text: "LIVE camera frame:" }, img(frame), { type: "text", text: `Problem the learner reported: "${ctx.problem}"
 Your diagnosis so far: ${ctx.plan.diagnosis}
 Plan: ${ctx.plan.steps.map((s, i) => `${i + 1}. ${s.title}`).join("; ")}
+Steps already finished (do not ask for these again): ${ctx.done?.length ? ctx.done.join("; ") : "none"}
 Current step ${ctx.current + 1}: "${step.title}". Instruction: ${step.instruction}
 Done when the camera shows: ${step.check}
 ${ctx.history.length ? `What you saw on earlier looks (oldest first):
@@ -197,10 +220,11 @@ export async function replanFix(frame: string, ctx: WatchContext, anomalies: Ano
     messages: [{ role: "user", content: [...referenceBlocks("all"), { type: "text", text: "LIVE camera frame:" }, img(frame), { type: "text", text: `Problem the learner reported: "${ctx.problem}"
 Diagnosis so far: ${ctx.plan.diagnosis}
 Plan so far: ${ctx.plan.steps.map((s, i) => `${i + 1}. ${s.title}`).join("; ")}
+Steps already finished (never repeat them, including any plug/power check): ${ctx.done?.length ? ctx.done.join("; ") : "none"}
 Current step ${ctx.current + 1}: "${step.title}".
 Earlier looks: ${ctx.history.map((h) => `- ${h}`).join("\n") || "(none)"}
 The quick look at this frame flagged: ${anomalies.map((a) => `${a.part}: ${a.issue}`).join("; ")}
-Verify against the frame yourself. Then write the new remaining steps that fix exactly what you see, in order, with what the camera must show for each. If the flag was wrong, say so and keep sensible steps.` }] }],
+Verify against the frame yourself. Then write the new remaining steps that fix exactly what you see, in order, with what the camera must show for each. Each step must be a new place or action; never repeat a finished step. If the flag was wrong, say so and keep sensible steps.` }] }],
   });
   if (!res.parsed_output) throw new Error("no replan");
   for (const st of res.parsed_output.remainingSteps) st.parts = st.parts.map((p) => p.toLowerCase().trim()).filter((p) => LABELS.includes(p));
