@@ -18,107 +18,103 @@ type Props = {
   onTap?: (label: string | null) => void;
 };
 
+type Box = [number, number, number, number];
+
 function hexA(hex: string, a: number) {
   const n = parseInt(hex.slice(1), 16);
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
 }
 
-/** Canvas painted over the video: colored masks (or boxes) + label pills. */
-export default function GlassesOverlay({ parts, view, drift, selected, focus, anomalies = [], onTap }: Props) {
+/**
+ * Canvas painted over the video. Runs its own animation loop: every box GLIDES toward where it should be
+ * (new detection + camera drift) instead of jumping, and labels fade in/out. That is what makes it feel smooth.
+ */
+export default function GlassesOverlay(props: Props) {
   const ref = useRef<HTMLCanvasElement>(null);
-  const imgs = useRef<Map<string, HTMLImageElement>>(new Map());
-  const tinted = useRef<Map<string, HTMLCanvasElement>>(new Map());
-
-  // Decode masks once per mask string.
-  useEffect(() => {
-    for (const p of parts) {
-      if (!p.mask || imgs.current.has(p.mask)) continue;
-      const im = new Image();
-      im.src = p.mask;
-      imgs.current.set(p.mask, im);
-    }
-  }, [parts]);
+  const p = useRef(props);
+  p.current = props;
+  // displayed state per label: smoothed box + opacity
+  const shown = useRef<Map<string, { box: Box; alpha: number; color: string }>>(new Map());
+  const smoothDrift = useRef({ dx: 0, dy: 0 });
 
   useEffect(() => {
-    const c = ref.current;
-    if (!c) return;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    c.width = view.w * dpr;
-    c.height = view.h * dpr;
-    const ctx = c.getContext("2d")!;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, view.w, view.h);
-    if (!view.vw || !view.vh) return;
-
-    // object-fit: cover mapping
-    const scale = Math.max(view.w / view.vw, view.h / view.vh);
-    const dw = view.vw * scale, dh = view.vh * scale;
-    const ox = (view.w - dw) / 2, oy = (view.h - dh) / 2;
-    const map = (x: number, y: number) => [ox + (x + drift.dx) * dw, oy + (y + drift.dy) * dh] as const;
-
     let raf = 0;
-    const draw = () => {
+    let last = performance.now();
+    const tick = (now: number) => {
+      raf = requestAnimationFrame(tick);
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      const c = ref.current;
+      const { parts, view, drift, selected, focus, anomalies = [] } = p.current;
+      if (!c || !view.vw || !view.vh) return;
+
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      if (c.width !== Math.round(view.w * dpr) || c.height !== Math.round(view.h * dpr)) {
+        c.width = Math.round(view.w * dpr);
+        c.height = Math.round(view.h * dpr);
+      }
+      const ctx = c.getContext("2d")!;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, view.w, view.h);
-      let pending = false;
-      for (const p of parts) {
-        const [x0, y0] = map(p.box[0], p.box[1]);
-        const [x1, y1] = map(p.box[2], p.box[3]);
+
+      // smooth the drift too (tracker moves in whole thumbnail pixels)
+      const kd = 1 - Math.exp(-dt * 14);
+      smoothDrift.current.dx += (drift.dx - smoothDrift.current.dx) * kd;
+      smoothDrift.current.dy += (drift.dy - smoothDrift.current.dy) * kd;
+
+      // object-fit: cover mapping
+      const scale = Math.max(view.w / view.vw, view.h / view.vh);
+      const dw = view.vw * scale, dh = view.vh * scale;
+      const ox = (view.w - dw) / 2, oy = (view.h - dh) / 2;
+      const map = (x: number, y: number) => [ox + (x + smoothDrift.current.dx) * dw, oy + (y + smoothDrift.current.dy) * dh] as const;
+
+      // glide each displayed box toward its target; fade out boxes whose part is gone
+      const kb = 1 - Math.exp(-dt * 6); // ~0.17 s time constant
+      const ka = 1 - Math.exp(-dt * 8);
+      const live = new Set<string>();
+      for (const part of parts) {
+        live.add(part.label);
+        const cur = shown.current.get(part.label);
+        if (!cur) shown.current.set(part.label, { box: [...part.box] as Box, alpha: 0, color: part.color });
+        else for (let i = 0; i < 4; i++) cur.box[i] += (part.box[i] - cur.box[i]) * kb;
+      }
+      for (const [label, st] of shown.current) {
+        const target = live.has(label) ? 1 : 0;
+        st.alpha += (target - st.alpha) * ka;
+        if (!live.has(label) && st.alpha < 0.02) shown.current.delete(label);
+      }
+
+      for (const [label, st] of shown.current) {
+        const [x0, y0] = map(st.box[0], st.box[1]);
+        const [x1, y1] = map(st.box[2], st.box[3]);
         const w = x1 - x0, h = y1 - y0;
-        const dim = (selected && selected !== p.label) || (focus && focus.size > 0 && !focus.has(p.label));
-        const alpha = dim ? 0.12 : 0.42;
-        const im = p.mask ? imgs.current.get(p.mask) : null;
-        if (im && im.complete && im.naturalWidth > 0) {
-          let t = tinted.current.get(p.mask + p.color);
-          if (!t) {
-            t = document.createElement("canvas");
-            t.width = im.naturalWidth; t.height = im.naturalHeight;
-            const tc = t.getContext("2d")!;
-            tc.drawImage(im, 0, 0);
-            const id = tc.getImageData(0, 0, t.width, t.height);
-            const d = id.data;
-            const n = parseInt(p.color.slice(1), 16);
-            const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
-            for (let i = 0; i < d.length; i += 4) {
-              const on = d[i] > 127;
-              d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = on ? 255 : 0;
-            }
-            tc.putImageData(id, 0, 0);
-            tinted.current.set(p.mask + p.color, t);
-          }
-          ctx.globalAlpha = alpha;
-          ctx.drawImage(t, x0, y0, w, h);
-          ctx.globalAlpha = 1;
-        } else {
-          if (im && !im.complete) pending = true;
-          ctx.fillStyle = hexA(p.color, alpha);
-          ctx.beginPath();
-          ctx.roundRect(x0, y0, w, h, 10);
-          ctx.fill();
-        }
-        ctx.strokeStyle = hexA(p.color, dim ? 0.4 : 0.95);
-        ctx.lineWidth = selected === p.label ? 4 : 2;
-        ctx.beginPath();
-        ctx.roundRect(x0, y0, w, h, 10);
-        ctx.stroke();
+        const dim = (selected && selected !== label) || (focus && focus.size > 0 && !focus.has(label));
+        const a = st.alpha * (dim ? 0.35 : 1);
+        ctx.fillStyle = hexA(st.color, 0.22 * a);
+        ctx.beginPath(); ctx.roundRect(x0, y0, w, h, 10); ctx.fill();
+        ctx.strokeStyle = hexA(st.color, 0.95 * a);
+        ctx.lineWidth = selected === label ? 4 : 2.5;
+        ctx.beginPath(); ctx.roundRect(x0, y0, w, h, 10); ctx.stroke();
 
         // label pill
-        const text = p.label.replace(/^\w/, (ch) => ch.toUpperCase());
+        const text = label.replace(/^\w/, (ch) => ch.toUpperCase());
         ctx.font = "600 14px -apple-system, system-ui, sans-serif";
         const tw = ctx.measureText(text).width + 18;
         const lx = Math.max(4, Math.min(x0, view.w - tw - 4));
         const ly = y0 - 26 < 4 ? y0 + 6 : y0 - 26;
-        ctx.fillStyle = dim ? hexA(p.color, 0.5) : p.color;
-        ctx.beginPath();
-        ctx.roundRect(lx, ly, tw, 22, 11);
-        ctx.fill();
+        ctx.globalAlpha = a;
+        ctx.fillStyle = st.color;
+        ctx.beginPath(); ctx.roundRect(lx, ly, tw, 22, 11); ctx.fill();
         ctx.fillStyle = "#000";
         ctx.fillText(text, lx + 9, ly + 15.5);
+        ctx.globalAlpha = 1;
       }
+
       // anomalies: red pulsing frame + issue tag
-      const pulse = 0.55 + 0.45 * Math.sin(Date.now() / 250);
-      for (const a of anomalies) {
-        const [x0, y0] = map(a.box[0], a.box[1]);
-        const [x1, y1] = map(a.box[2], a.box[3]);
+      const pulse = 0.55 + 0.45 * Math.sin(now / 250);
+      for (const an of anomalies) {
+        const [x0, y0] = map(an.box[0], an.box[1]);
+        const [x1, y1] = map(an.box[2], an.box[3]);
         ctx.strokeStyle = `rgba(255,59,48,${0.5 + 0.5 * pulse})`;
         ctx.lineWidth = 3;
         ctx.setLineDash([8, 6]);
@@ -126,7 +122,7 @@ export default function GlassesOverlay({ parts, view, drift, selected, focus, an
         ctx.setLineDash([]);
         ctx.fillStyle = `rgba(255,59,48,${0.12 + 0.1 * pulse})`;
         ctx.beginPath(); ctx.roundRect(x0, y0, x1 - x0, y1 - y0, 8); ctx.fill();
-        const text = `⚠ ${a.issue}`;
+        const text = `⚠ ${an.issue}`;
         ctx.font = "700 13px -apple-system, system-ui, sans-serif";
         const tw = Math.min(ctx.measureText(text).width + 18, view.w - 8);
         const lx = Math.max(4, Math.min(x0, view.w - tw - 4));
@@ -136,30 +132,29 @@ export default function GlassesOverlay({ parts, view, drift, selected, focus, an
         ctx.fillStyle = "#fff";
         ctx.fillText(text, lx + 9, ly + 15.5, tw - 18);
       }
-      if (pending || anomalies.length) raf = requestAnimationFrame(draw);
     };
-    draw();
+    raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [parts, view, drift, selected, focus, anomalies]);
+  }, []);
 
   return (
     <canvas
       ref={ref}
-      style={{ width: view.w, height: view.h }}
+      style={{ width: props.view.w, height: props.view.h }}
       className="absolute inset-0"
       onClick={(e) => {
+        const { parts, view, onTap } = p.current;
         if (!onTap) return;
         const rect = (e.target as HTMLCanvasElement).getBoundingClientRect();
         const px = e.clientX - rect.left, py = e.clientY - rect.top;
         const scale = Math.max(view.w / view.vw, view.h / view.vh);
         const dw = view.vw * scale, dh = view.vh * scale;
-        const x = (px - (view.w - dw) / 2) / dw, y = (py - (view.h - dh) / 2) / dh;
-        // smallest box containing the tap wins
+        const x = (px - (view.w - dw) / 2) / dw - smoothDrift.current.dx, y = (py - (view.h - dh) / 2) / dh - smoothDrift.current.dy;
         let best: OverlayPart | null = null;
-        for (const p of parts) {
-          const [x0, y0, x1, y1] = p.box;
+        for (const part of parts) {
+          const [x0, y0, x1, y1] = part.box;
           if (x >= x0 && x <= x1 && y >= y0 && y <= y1) {
-            if (!best || (x1 - x0) * (y1 - y0) < (best.box[2] - best.box[0]) * (best.box[3] - best.box[1])) best = p;
+            if (!best || (x1 - x0) * (y1 - y0) < (best.box[2] - best.box[0]) * (best.box[3] - best.box[1])) best = part;
           }
         }
         onTap(best?.label ?? null);
