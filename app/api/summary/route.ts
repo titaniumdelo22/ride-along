@@ -14,6 +14,7 @@ export async function POST(req: Request) {
       mistakes: list(body.mistakes),
       questions: list(body.questions),
       redone: list(body.redone),
+      surprises: list(body.surprises),
     });
     return Response.json({ report });
   } catch (e) {

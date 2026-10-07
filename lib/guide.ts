@@ -66,6 +66,13 @@ export const Watch = z.object({
     .describe("Which way the learner should move the camera so you can see what you need, or null if the view is fine"),
   safety: z.string().nullable().describe("An urgent safety warning if something unsafe is happening, else null"),
   mistake: z.string().nullable().describe("A mistake the learner just made, in a few words, else null"),
+  surprise: z
+    .object({
+      what: z.string().describe("The unexpected thing, under 8 words, e.g. 'Water pooling under the unit'"),
+      steps: z.array(Step).describe("1 to 3 new steps to deal with it before going on; empty if nothing extra is needed"),
+    })
+    .nullable()
+    .describe("ONLY when something unexpected shows up that changes the plan: a leak, burn marks, a stuck or stripped screw, rust, a broken or missing part, a different setup than planned. Else null. Never repeat one already handled."),
 });
 export type Watch = z.infer<typeof Watch>;
 
@@ -85,6 +92,7 @@ export type ReportInput = {
   mistakes: string[];
   questions: string[];
   redone: string[]; // steps the learner went back to
+  surprises?: string[]; // curveballs that came up
 };
 
 export type Level = "newbie" | "intermediate" | "advanced";
@@ -108,6 +116,7 @@ export type WatchInput = {
   current: number;
   teach: boolean;
   recent: string[]; // what the coach said lately, newest last
+  surprises?: string[]; // curveballs already handled on this job
   userSaid: string | null;
 };
 
@@ -117,7 +126,8 @@ const COACH = `You are a patient journeyman with 25 years in the trades, on a li
 - Stay quiet when nothing needs saying (say: null). Never repeat yourself.
 - Only mark a step done when the camera clearly shows it.
 - Point at the exact part you mean when it helps.
-- Safety beats speed, always.`;
+- Safety beats speed, always.
+- Real jobs never go exactly to plan. Watch for curveballs: a leak, burn marks, a stuck screw, rust, a broken or missing part, a setup that doesn't match the plan. When one shows up, stay calm, say what you see, and add the steps to handle it. That is the most valuable thing you teach.`;
 
 export function haveCredentials(): boolean {
   return !!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
@@ -188,6 +198,8 @@ export async function watch(input: WatchInput): Promise<Watch> {
 Current step ${input.current + 1} of ${input.plan.steps.length}: "${step.title}". Instruction: ${step.instruction}
 Done when the camera shows: ${step.check}
 ${step.safety ? `Safety for this step: ${step.safety}` : ""}
+Steps after this: ${input.plan.steps.slice(input.current + 1).map((s) => s.title).join(", ") || "none, this is the last one"}.
+Curveballs already handled: ${input.surprises?.length ? input.surprises.join("; ") : "none"}.
 Learner level: ${LEVEL_WATCH[input.level ?? "newbie"]}
 ${input.teach ? "TEACH MODE: when a step finishes, before telling them the next one, ask what they think comes next and why. Praise right answers, correct wrong ones kindly." : ""}
 What you said lately: ${input.recent.length ? input.recent.map((s) => `"${s}"`).join(" ") : "(nothing yet)"}
@@ -215,6 +227,7 @@ Time: about ${Math.max(1, Math.round(input.minutes))} minutes.
 Mistakes you caught: ${input.mistakes.length ? input.mistakes.join("; ") : "none"}.
 Questions they asked: ${input.questions.length ? input.questions.join("; ") : "none"}.
 Steps they went back to: ${input.redone.length ? input.redone.join("; ") : "none"}.
+Curveballs that came up and how they handled them: ${input.surprises?.length ? input.surprises.join("; ") : "none"}.
 Write their job report: plain words, warm, specific to what happened on THIS job, so they can explain it to others and teach it.`;
   const res = await anthropic().messages.parse({
     model: MODEL,
@@ -273,6 +286,26 @@ const MOCK_POINTS = [
 let mockTicks = 0;
 let mockStep = -1;
 function mockWatch(input: WatchInput): Watch {
+  const w = mockWatchBase(input);
+  if (input.current === 2 && mockTicks === 2 && !input.surprises?.length) {
+    return {
+      ...w,
+      stepDone: false,
+      say: "Hold on, I see water on the floor under it. Let's check that first.",
+      point: { x: 0.5, y: 0.9, label: "Water on the floor" },
+      surprise: {
+        what: "Water pooling under the cooler",
+        steps: [
+          { icon: "💧", title: "Check the drip tray", instruction: "Pull out the tray under the taps and empty it.", check: "The drip tray is out and empty", why: "A full tray often looks like a leak.", safety: null, skill: "Finding a leak" },
+          { icon: "🧻", title: "Dry it and watch", instruction: "Dry the floor, then watch it for a minute.", check: "The floor under the cooler is dry", why: "If it comes back, the leak is inside.", safety: "Keep water away from the plug.", skill: "Leak tracing" },
+        ],
+      },
+    };
+  }
+  return w;
+}
+
+function mockWatchBase(input: WatchInput): Omit<Watch, "surprise"> & { surprise: null } {
   if (mockStep !== input.current) {
     mockStep = input.current;
     mockTicks = 0;
@@ -281,17 +314,17 @@ function mockWatch(input: WatchInput): Watch {
   const step = input.plan.steps[input.current];
   const point = MOCK_POINTS[input.current] ?? null;
   if (input.userSaid) {
-    return { see: "The learner is asking a question.", stepDone: false, say: `Good question. ${step.why} You're doing fine, take your time.`, point, aim: null, safety: null, mistake: null };
+    return { see: "The learner is asking a question.", stepDone: false, say: `Good question. ${step.why} You're doing fine, take your time.`, point, aim: null, safety: null, mistake: null, surprise: null };
   }
   if (mockTicks === 1 && input.current === 1) {
-    return { see: "The label is too far away to read.", stepDone: false, say: "Get a little closer to that label so I can read it.", point, aim: "closer", safety: null, mistake: null };
+    return { see: "The label is too far away to read.", stepDone: false, say: "Get a little closer to that label so I can read it.", point, aim: "closer", safety: null, mistake: null, surprise: null };
   }
   if (mockTicks === 1 && input.current === 2) {
-    return { see: "Looking at the side of the unit.", stepDone: false, say: "Swing around to the back, where the black coils are.", point: null, aim: "right", safety: null, mistake: null };
+    return { see: "Looking at the side of the unit.", stepDone: false, say: "Swing around to the back, where the black coils are.", point: null, aim: "right", safety: null, mistake: null, surprise: null };
   }
-  if (mockTicks === 1) return { see: "The unit is in view.", stepDone: false, say: null, point, aim: null, safety: null, mistake: null };
+  if (mockTicks === 1) return { see: "The unit is in view.", stepDone: false, say: null, point, aim: null, safety: null, mistake: null, surprise: null };
   if (mockTicks === 2 && input.current === 3) {
-    return { see: "Brushing across the coils.", stepDone: false, say: "Easy, you're brushing across the tubes and packing dust in. Go top to bottom, with the tubes.", point, aim: null, safety: null, mistake: "Brushed across the coils instead of with them" };
+    return { see: "Brushing across the coils.", stepDone: false, say: "Easy, you're brushing across the tubes and packing dust in. Go top to bottom, with the tubes.", point, aim: null, safety: null, mistake: "Brushed across the coils instead of with them", surprise: null };
   }
   if (mockTicks >= 4) {
     const next = input.plan.steps[input.current + 1];
@@ -300,7 +333,7 @@ function mockWatch(input: WatchInput): Watch {
         ? `Nice, that's done. What do you think comes next, and why?`
         : `That's it, nice work. Next: ${next.instruction}`
       : "That's the job. Clean coils, good airflow. Give it twenty minutes and that water will be cold.";
-    return { see: "The step is done.", stepDone: true, say, point: next ? MOCK_POINTS[input.current + 1] ?? null : null, aim: null, safety: null, mistake: null };
+    return { see: "The step is done.", stepDone: true, say, point: next ? MOCK_POINTS[input.current + 1] ?? null : null, aim: null, safety: null, mistake: null, surprise: null };
   }
-  return { see: "Working on it.", stepDone: false, say: null, point, aim: null, safety: null, mistake: null };
+  return { see: "Working on it.", stepDone: false, say: null, point, aim: null, safety: null, mistake: null, surprise: null };
 }

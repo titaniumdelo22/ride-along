@@ -8,11 +8,13 @@ import type { Identify } from "@/lib/identify";
 type Phase = "setup" | "identify" | "planning" | "loadout" | "guiding" | "done";
 type Level = "newbie" | "intermediate" | "advanced";
 const LEVEL_PICKS: { id: Level; icon: string; name: string; hint: string }[] = [
-  { id: "newbie", icon: "🐣", name: "Newbie", hint: "Small steps" },
-  { id: "intermediate", icon: "🔧", name: "Intermediate", hint: "Normal pace" },
-  { id: "advanced", icon: "🏆", name: "Advanced", hint: "Pro speed" },
+  { id: "newbie", icon: "🐣", name: "Newbie", hint: "Never done it" },
+  { id: "intermediate", icon: "🔧", name: "Intermediate", hint: "A few times" },
+  { id: "advanced", icon: "🏆", name: "Advanced", hint: "I'm a pro" },
 ];
 type Point = NonNullable<Watch["point"]>;
+// A step Ray added mid-job because something unexpected showed up.
+type JobStep = Plan["steps"][number] & { surprise?: boolean };
 
 // Minimal typing for the browser's speech recognition (webkit prefix on Safari/Chrome).
 type Recognition = {
@@ -82,6 +84,7 @@ const BADGES = {
   onfire: { icon: "🔥", name: "On Fire", why: "3 clean steps in a row" },
   clean: { icon: "🎯", name: "Zero Mistakes", why: "A whole job, no mistakes" },
   done: { icon: "🏁", name: "Job Done", why: "Finished the job" },
+  curveball: { icon: "🚧", name: "Curveball", why: "Handled a surprise" },
 } as const;
 type BadgeId = keyof typeof BADGES;
 
@@ -156,6 +159,7 @@ export default function CallPage() {
   const recentRef = useRef<string[]>([]);
   const questionsRef = useRef<string[]>([]);
   const redoneRef = useRef<string[]>([]);
+  const surprisesRef = useRef<string[]>([]);
   const clearedRef = useRef<Set<number>>(new Set());
   const jobRef = useRef(0);
   const handsFreeRef = useRef(true);
@@ -178,10 +182,12 @@ export default function CallPage() {
   const [phase, setPhase] = useState<Phase>("setup");
   const [camOn, setCamOn] = useState(false);
   const [camError, setCamError] = useState<string | null>(null);
-  const [mission, setMission] = useState(0);
+  // The start, one question per page: your level (asked once), point at it, or pick the job.
+  const [page, setPage] = useState<"level" | "point" | "job">("level");
   const [task, setTask] = useState(MISSIONS[0].task);
-  const [scanLabel, setScanLabel] = useState(true);
-  const [teach, setTeach] = useState(true);
+  // Always on: read the label, and teach (ask what comes next) instead of just telling.
+  const scanLabel = true;
+  const teach = true;
   const [level, setLevel] = useState<Level>("newbie");
   const [gear, setGear] = useState<Set<number>>(new Set());
   const [kit, setKit] = useState<Kit | null>(null);
@@ -194,6 +200,7 @@ export default function CallPage() {
   const [handsFree, setHandsFree] = useState(true);
   const [earOn, setEarOn] = useState(false);
   const [heard, setHeard] = useState<string | null>(null);
+  const [curveball, setCurveball] = useState<string | null>(null);
   const [found, setFound] = useState<Identify | null>(null);
   const [looking, setLooking] = useState(false);
   const [snap, setSnap] = useState<{ src: string; w: number; h: number } | null>(null);
@@ -221,6 +228,13 @@ export default function CallPage() {
 
   useEffect(() => {
     xpRef.current = readXp();
+    try {
+      const saved = localStorage.getItem("ra.level");
+      if (saved === "newbie" || saved === "intermediate" || saved === "advanced") {
+        setLevel(saved);
+        setPage("point");
+      }
+    } catch {}
     setXp(xpRef.current);
   }, []);
   useEffect(() => {
@@ -469,6 +483,8 @@ export default function CallPage() {
       recentRef.current = [];
       questionsRef.current = [];
       redoneRef.current = [];
+      surprisesRef.current = [];
+      setCurveball(null);
       setGear(new Set());
       setPhase("loadout");
       speak(`Before we start, grab your gear: ${k.tools.map((t) => t.name).join(", ")}.`);
@@ -583,7 +599,7 @@ export default function CallPage() {
         const res = await fetch("/api/watch", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ frame: capture(), task, level, plan, current, teach, recent: recentRef.current, userSaid }),
+          body: JSON.stringify({ frame: capture(), task, level, plan, current, teach, recent: recentRef.current, userSaid, surprises: surprisesRef.current }),
         });
         const w = (await res.json()) as Watch & { error?: string };
         if (w.error) return;
@@ -602,10 +618,26 @@ export default function CallPage() {
           setFlash("bad");
           cue("bad");
         }
+        // A curveball: Ray adds the steps to handle it, right here, before the rest of the job.
+        let detour = false;
+        if (w.surprise && !surprisesRef.current.includes(w.surprise.what)) {
+          surprisesRef.current = [...surprisesRef.current, w.surprise.what];
+          const extra: JobStep[] = w.surprise.steps.map((x) => ({ ...x, surprise: true }));
+          if (extra.length) {
+            detour = true;
+            setPlan((p) => (p ? { ...p, steps: [...p.steps.slice(0, current), ...extra, ...p.steps.slice(current)] } : p));
+          }
+          setCurveball(w.surprise.what);
+          cue("badge");
+          award(30, ["🚧 Curveball spotted"]);
+        }
         const theyreTalking = !userSaid && Date.now() - voiceAt.current < 2500;
         if (w.say && !theyreTalking && (userSaid || !window.speechSynthesis?.speaking)) speak(w.say);
         else if (w.safety) speak(w.safety);
-        if (w.stepDone) stepCleared(current, plan.steps.length);
+        if (w.stepDone && !detour) {
+          if ((plan.steps[current] as JobStep).surprise) unlock("curveball");
+          stepCleared(current, plan.steps.length);
+        }
       } catch {
         // The next tick tries again.
       } finally {
@@ -617,7 +649,7 @@ export default function CallPage() {
         }
       }
     },
-    [plan, capture, task, level, current, teach, speak, stepCleared]
+    [plan, capture, task, level, current, teach, speak, stepCleared, award, unlock]
   );
   useEffect(() => {
     tickRef.current = tick;
@@ -627,9 +659,10 @@ export default function CallPage() {
   const markDone = useCallback(() => {
     if (!plan) return;
     const next = plan.steps[current + 1];
+    if ((plan.steps[current] as JobStep).surprise) unlock("curveball");
     stepCleared(current, plan.steps.length);
     if (next) speak(`Nice. Step ${current + 2}: ${next.instruction}`);
-  }, [plan, current, stepCleared, speak]);
+  }, [plan, current, stepCleared, speak, unlock]);
 
   useEffect(() => {
     if (phase !== "guiding") return;
@@ -650,7 +683,7 @@ export default function CallPage() {
     fetch("/api/summary", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ plan, level, minutes: (Date.now() - startedAt.current) / 60000, mistakes, questions: questionsRef.current, redone: redoneRef.current }),
+      body: JSON.stringify({ plan, level, minutes: (Date.now() - startedAt.current) / 60000, mistakes, questions: questionsRef.current, redone: redoneRef.current, surprises: surprisesRef.current }),
     })
       .then((r) => r.json())
       .then((d: { report?: Report }) => {
@@ -741,7 +774,10 @@ export default function CallPage() {
       r.onresult = (e) => {
         const text = Array.from(e.results).map((x) => x[0].transcript).join(" ").trim();
         if (!text) return;
-        if (mode === "task") setTask(text);
+        if (mode === "task") {
+          setTask(text);
+          begin(text);
+        }
         else if (mode === "identify") {
           setTask(text);
           lookAt(text);
@@ -778,6 +814,11 @@ export default function CallPage() {
     else stopEar();
   }, [phase, handsFree, startEar, stopEar]);
   useEffect(() => () => stopEar(), [stopEar]);
+  useEffect(() => {
+    if (!curveball) return;
+    const id = setTimeout(() => setCurveball(null), 6000);
+    return () => clearTimeout(id);
+  }, [curveball]);
   useEffect(() => {
     if (!heard) return;
     const id = setTimeout(() => setHeard(null), 6000);
@@ -989,6 +1030,16 @@ export default function CallPage() {
       )}
 
       {/* Safety */}
+      {curveball && phase === "guiding" && !safety && (
+        <div key={curveball} className="absolute inset-x-4 top-36 flex animate-[rise_.4s_ease-out] items-center gap-3 rounded-3xl bg-[#F59E0B] px-4 py-3 text-black shadow-2xl">
+          <span className="text-4xl">🚧</span>
+          <span>
+            <span className="block text-xs font-black uppercase tracking-[0.2em]">Curveball</span>
+            <span className="text-lg font-extrabold leading-tight">{curveball}</span>
+          </span>
+        </div>
+      )}
+
       {safety && phase === "guiding" && (
         <div className="absolute inset-x-4 top-36 flex items-center gap-3 rounded-3xl bg-red-600 px-4 py-3 text-xl font-extrabold shadow-2xl animate-pulse">
           <span className="text-4xl">⚠️</span>
@@ -996,74 +1047,95 @@ export default function CallPage() {
         </div>
       )}
 
-      {/* SETUP: pick a mission */}
-      {phase === "setup" && (
-        <div className="absolute inset-x-0 bottom-0 max-h-[calc(100%-5.5rem)] overflow-y-auto pb-8">
-          <div className="px-5">
-            <div className="text-xs font-extrabold uppercase tracking-[0.25em] text-[#FFB38A]">Pick a mission</div>
-            <h1 className="mt-1 text-2xl font-black leading-tight">Point your camera at the job.</h1>
-            <button onClick={() => lookAt()} className="mt-3 flex w-full items-center gap-3 rounded-3xl bg-white/12 bg-white/10 p-3 text-left backdrop-blur active:scale-[.98]">
-              <span className="grid h-12 w-12 flex-none place-items-center rounded-2xl bg-white text-2xl">🔍</span>
-              <span>
-                <span className="block text-lg font-extrabold leading-tight">What am I looking at?</span>
-                <span className="block text-sm text-white/60">Ray names it, labels the parts, and tells you where to start</span>
-              </span>
-            </button>
-          </div>
-          <div className="mt-4 flex snap-x gap-3 overflow-x-auto px-5 pb-1">
-            {MISSIONS.map((m, i) => (
+      {/* SETUP, page 1: your level (asked once, then remembered) */}
+      {phase === "setup" && page === "level" && (
+        <div className="absolute inset-x-0 bottom-0 animate-[rise_.4s_ease-out] px-6 pb-10">
+          <h1 className="text-4xl font-black leading-[1.05]">Have you done this before?</h1>
+          <p className="mt-2 text-white/60">Ray goes at your speed.</p>
+          <div className="mt-6 divide-y divide-white/10 border-y border-white/10">
+            {LEVEL_PICKS.map((l) => (
               <button
-                key={m.title}
+                key={l.id}
                 onClick={() => {
-                  setMission(i);
-                  setTask(m.task);
+                  setLevel(l.id);
+                  try {
+                    localStorage.setItem("ra.level", l.id);
+                  } catch {}
+                  cue("coin");
+                  setPage("point");
                 }}
-                className={`w-44 flex-none snap-start rounded-3xl p-4 text-left transition ${mission === i ? "bg-gradient-to-br from-[#FF8A3D] to-[#E4540B] shadow-[0_8px_30px_rgba(255,107,26,.45)]" : "bg-white/10 backdrop-blur"}`}
+                className="flex w-full items-center gap-4 py-5 text-left active:opacity-60"
               >
-                <div className="text-4xl">{m.icon}</div>
-                <div className="mt-2 text-base font-extrabold leading-tight">{m.title}</div>
-                <div className="mt-2 flex items-center justify-between text-xs font-bold">
-                  <span>{"★".repeat(m.stars)}<span className="opacity-40">{"★".repeat(3 - m.stars)}</span></span>
-                  <span className="text-[#FFD23F]">+{m.xp} XP</span>
-                </div>
+                <span className="text-4xl">{l.icon}</span>
+                <span className="flex-1 text-2xl font-extrabold">{l.hint}</span>
+                <span className="text-2xl text-white/40">›</span>
               </button>
             ))}
           </div>
-          <div className="mt-4 px-5">
-            <div className="text-xs font-extrabold uppercase tracking-[0.25em] text-white/50">Your level</div>
-            <div className="mt-2 grid grid-cols-3 gap-2">
-              {LEVEL_PICKS.map((l) => (
-                <button key={l.id} onClick={() => setLevel(l.id)} className={`rounded-2xl px-2 py-2.5 text-center transition ${level === l.id ? "bg-white text-black shadow-lg" : "bg-white/10"}`}>
-                  <div className="text-2xl">{l.icon}</div>
-                  <div className="text-sm font-extrabold">{l.name}</div>
-                  <div className={`text-[11px] ${level === l.id ? "text-black/60" : "text-white/50"}`}>{l.hint}</div>
-                </button>
-              ))}
-            </div>
-            <div className="mt-3 flex gap-2">
-              <input
-                value={task}
-                onChange={(e) => setTask(e.target.value)}
-                className="min-w-0 flex-1 rounded-2xl bg-white/12 px-4 py-3 text-base outline-none placeholder:text-white/50 backdrop-blur bg-white/10"
-                placeholder="Or say what you're working on"
-              />
-              <button onClick={() => listen("task")} className={`rounded-2xl px-4 text-xl ${listening ? "bg-[#FF6B1A]" : "bg-white/10"}`} aria-label="Say it">
-                🎙️
+        </div>
+      )}
+
+      {/* SETUP, page 2: point at it */}
+      {phase === "setup" && page === "point" && (
+        <div className="absolute inset-x-0 bottom-0 animate-[rise_.4s_ease-out] px-6 pb-10">
+          <h1 className="text-4xl font-black leading-[1.05]">Point at what&apos;s broken.</h1>
+          {(camError || error) && <p className="mt-3 text-sm text-red-300">{camError ?? error}</p>}
+          <button
+            onClick={() => lookAt()}
+            className="mt-6 flex h-20 w-full items-center justify-center gap-3 rounded-full bg-gradient-to-r from-[#FF8A3D] to-[#FF3D6E] text-2xl font-black shadow-[0_10px_40px_rgba(255,107,26,.5)] active:scale-[.98]"
+          >
+            🔍 What am I looking at?
+          </button>
+          <button onClick={() => setPage("job")} className="mt-5 w-full text-center text-lg font-bold text-white/80">
+            I know what it is →
+          </button>
+          <button onClick={() => setPage("level")} className="mt-4 w-full text-center text-sm text-white/40">
+            {LEVEL_PICKS.find((l) => l.id === level)?.icon} {LEVEL_PICKS.find((l) => l.id === level)?.name} · change
+          </button>
+        </div>
+      )}
+
+      {/* SETUP, page 3: pick the job, or say it */}
+      {phase === "setup" && page === "job" && (
+        <div className="absolute inset-x-0 bottom-0 animate-[rise_.4s_ease-out] px-6 pb-10">
+          <button onClick={() => setPage("point")} className="mb-3 text-lg text-white/60">
+            ‹ Back
+          </button>
+          <h1 className="text-4xl font-black leading-[1.05]">What&apos;s the job?</h1>
+          {error && <p className="mt-3 text-sm text-red-300">{error}</p>}
+          <div className="mt-5 divide-y divide-white/10 border-y border-white/10">
+            {MISSIONS.map((m) => (
+              <button
+                key={m.title}
+                onClick={() => {
+                  setTask(m.task);
+                  begin(m.task);
+                }}
+                className="flex w-full items-center gap-4 py-4 text-left active:opacity-60"
+              >
+                <span className="text-3xl">{m.icon}</span>
+                <span className="flex-1 text-xl font-extrabold leading-tight">{m.title}</span>
+                <span className="text-sm font-bold text-[#FFD23F]">+{m.xp} XP</span>
               </button>
-            </div>
-            <div className="mt-3 flex gap-2 text-sm">
-              <button onClick={() => setScanLabel((s) => !s)} className={`rounded-full px-4 py-2 font-bold ${scanLabel ? "bg-white text-black" : "bg-white/10"}`}>
-                🏷️ Read the label
-              </button>
-              <button onClick={() => setTeach((t) => !t)} className={`rounded-full px-4 py-2 font-bold ${teach ? "bg-white text-black" : "bg-white/10"}`}>
-                🧠 Teach me
-              </button>
-            </div>
-            {(camError || error) && <p className="mt-3 text-sm text-red-300">{camError ?? error}</p>}
-            <button onClick={() => begin()} className="mt-5 h-16 w-full rounded-full bg-gradient-to-r from-[#FF8A3D] to-[#FF3D6E] text-xl font-black shadow-[0_10px_40px_rgba(255,107,26,.5)] active:scale-[.98]">
-              📞 Call Ray
-            </button>
+            ))}
           </div>
+          <form
+            className="mt-5 flex items-center gap-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (task.trim()) begin(task.trim());
+            }}
+          >
+            <button type="button" onClick={() => listen("task")} className={`grid h-14 w-14 flex-none place-items-center rounded-full text-2xl ${listening ? "animate-pulse bg-[#FF6B1A]" : "bg-white text-black"}`} aria-label="Say it">
+              🎙️
+            </button>
+            <input
+              value={MISSIONS.some((m) => m.task === task) ? "" : task}
+              onChange={(e) => setTask(e.target.value)}
+              className="min-w-0 flex-1 border-b border-white/25 bg-transparent py-2 text-lg outline-none placeholder:text-white/45"
+              placeholder="Or say it, or type it"
+            />
+          </form>
         </div>
       )}
 
@@ -1251,7 +1323,7 @@ export default function CallPage() {
         <div className="absolute inset-x-0 bottom-0 p-5 pb-7">
           {heard && !speaking && <div className="mb-3 ml-auto w-fit max-w-[85%] animate-[rise_.3s_ease-out] rounded-2xl rounded-br-md bg-white px-4 py-2 text-base font-semibold text-black">“{heard}”</div>}
           {caption && speaking && <div className="mb-3 line-clamp-2 rounded-2xl bg-black/60 px-4 py-2 text-base leading-snug text-white/95 backdrop-blur">{caption}</div>}
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4" onClick={() => setShowSteps(true)}>
             <div
               className="grid h-24 w-24 flex-none place-items-center rounded-full p-1.5"
               style={{ background: `conic-gradient(${ORANGE} ${(current / plan.steps.length) * 360}deg, rgba(255,255,255,.15) 0deg)` }}
@@ -1260,12 +1332,13 @@ export default function CallPage() {
             </div>
             <div className="min-w-0">
               <div className="text-xs font-extrabold uppercase tracking-[0.2em] text-[#FFB38A]">
-                Step {current + 1} / {plan.steps.length} <span className="text-[#FFD23F]">· +75 XP</span>
+                Step {current + 1} / {plan.steps.length}{" "}
+                {(step as JobStep).surprise ? <span className="text-[#F59E0B]">· 🚧 Curveball</span> : <span className="text-[#FFD23F]">· +75 XP</span>}
               </div>
               <div className="text-3xl font-black leading-tight">{step.title}</div>
             </div>
           </div>
-          <div className="mt-4 grid grid-cols-5 gap-2.5">
+          <div className={`mt-4 grid gap-2.5 ${handsFree ? "grid-cols-4" : "grid-cols-5"}`}>
             <button
               onClick={() => goTo(current - 1)}
               disabled={current === 0}
@@ -1284,16 +1357,16 @@ export default function CallPage() {
             >
               🔁
             </button>
+            {!handsFree && (
             <button onClick={() => listen("ask")} className={`col-span-2 grid h-20 place-items-center rounded-3xl text-3xl active:scale-95 ${listening ? "bg-[#FF6B1A] animate-pulse" : "bg-white text-black"}`} aria-label="Ask Ray">
               {listening ? "👂" : "🎙️"}
             </button>
-            <button onClick={markDone} className="grid h-20 place-items-center rounded-3xl bg-[#22C55E] text-3xl shadow-[0_8px_24px_rgba(34,197,94,.45)] active:scale-95" aria-label="Done with this step">
+            )}
+            <button onClick={markDone} className="col-span-2 grid h-20 place-items-center rounded-3xl bg-[#22C55E] text-3xl shadow-[0_8px_24px_rgba(34,197,94,.45)] active:scale-95" aria-label="Done with this step">
               ✓
             </button>
           </div>
-          <button onClick={() => setShowSteps(true)} className="mt-3 w-full text-center text-sm text-white/55">
-            {handsFree ? "🎙️ Just talk: “next”, “back”, “repeat”, or ask · Map" : "Mission map · tap any step to jump"}
-          </button>
+          <p className="mt-3 text-center text-sm text-white/50">{handsFree ? "Just talk. Say “next” when it’s done." : "Tap 🎙️ to ask Ray"}</p>
         </div>
       )}
 
@@ -1313,7 +1386,7 @@ export default function CallPage() {
                   goTo(i);
                 }}
               >
-                <span className={`grid h-11 w-11 flex-none place-items-center rounded-full text-xl ${i < current ? "bg-[#22C55E]" : i === current ? "bg-[#FF6B1A]" : "bg-white/10"}`}>{i < current ? "✓" : s.icon}</span>
+                <span className={`grid h-11 w-11 flex-none place-items-center rounded-full text-xl ${i < current ? "bg-[#22C55E]" : i === current ? "bg-[#FF6B1A]" : (s as JobStep).surprise ? "bg-[#F59E0B]/40" : "bg-white/10"}`}>{i < current ? "✓" : (s as JobStep).surprise ? "🚧" : s.icon}</span>
                 <div>
                   <div className="font-bold">{s.title}</div>
                   <div className="text-xs text-white/55">{s.skill}</div>
@@ -1438,6 +1511,7 @@ export default function CallPage() {
             <button
               onClick={() => {
                 jobRef.current++;
+                setPage("point");
                 setPhase("setup");
                 setPlan(null);
                 setKit(null);
