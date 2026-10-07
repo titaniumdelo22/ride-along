@@ -405,7 +405,7 @@ export default function GlassesPage() {
       <div className="absolute right-3 top-12 flex gap-1.5 text-[11px]">
         <button onClick={() => setPaused((p) => !p)} className="rounded-full bg-black/50 px-2.5 py-1 font-semibold backdrop-blur">{paused ? "Resume" : "Freeze"}</button>
         <button onClick={() => setTracking((t) => !t)} className={`rounded-full px-2.5 py-1 font-semibold backdrop-blur ${tracking ? "bg-black/50" : "bg-black/30 text-white/50"}`}>Track</button>
-        <Link href="/call" className="rounded-full bg-gradient-to-r from-[#FF8A3D] to-[#FF3D6E] px-4 py-1.5 text-sm font-black shadow-[0_6px_20px_rgba(255,107,26,.5)]">📞 Ask Ray</Link>
+        <Link href="/call" className="rounded-full bg-hazard px-4 py-1.5 font-display text-sm uppercase tracking-wide text-ink">📞 Ask Ray</Link>
       </div>
 
       <ScanDrawer mode={mode} setMode={(m) => { setMode(m); if (m !== "tour" && m !== "fix") setSelected(null); if (m === "tour") setSelected(PARTS[tourIndex].label); }}

@@ -12,6 +12,10 @@ import { haveCredentials, MODEL, type Level } from "./guide";
 
 export const Identify = z.object({
   name: z.string().describe("What this is, 2 to 4 plain words, e.g. 'Water cooler'"),
+  state: z
+    .string()
+    .nullable()
+    .describe("What shape it's in RIGHT NOW if it isn't normal, under 8 words, e.g. 'Back cover off, screws out', 'Unplugged', 'Leaking at the base'. Null if it looks normal and closed up."),
   what: z.string().describe("ONE short sentence, under 12 simple words, on what it does"),
   parts: z
     .array(
@@ -50,7 +54,8 @@ const SYSTEM = `You are a patient journeyman with 25 years across the trades (HV
 - Very short. Write so a 5th grader gets it: short everyday words, short sentences.
 - Point at ONE thing first (focus): the most important part to look at. Don't make them look at five things at once. No jargon; if you must use a trade word, explain it in 3 words.
 - Be honest about danger: say plainly when something is a licensed pro's job, and what they CAN safely do.
-- Only pin parts you can actually see. If unsure, say what it most likely is.`;
+- Only pin parts you can actually see. If unsure, say what it most likely is.
+- Notice what condition it's in right now: covers off, taken apart, screws out, parts missing, unplugged, wet, burnt. Say that FIRST, and let it drive what you suggest (taken apart means: put it back together).`;
 
 let client: Anthropic | null = null;
 
@@ -95,6 +100,7 @@ They are a ${level}. ${mode === "parts" ? PARTS : "What are they looking at, and
 
 const MOCK: Identify = {
   name: "Water cooler",
+  state: null,
   what: "A tiny fridge that keeps drinking water cold.",
   parts: [
     { x: 0.6, y: 0.5, label: "Label", what: "Model, power, and coolant type" },

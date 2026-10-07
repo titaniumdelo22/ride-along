@@ -1,28 +1,20 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Anton, Archivo, Space_Mono } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+// Workwear x streetwear: heavy condensed caps, a grotesk body, data-plate mono.
+const display = Anton({ variable: "--font-anton", weight: "400", subsets: ["latin"] });
+const sans = Archivo({ variable: "--font-archivo", subsets: ["latin"] });
+const mono = Space_Mono({ variable: "--font-spacemono", weight: ["400", "700"], subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "Ride Along: a journeyman on call",
-  description: "Point your phone at the job. An AI journeyman sees what you see and walks you through it.",
+  description: "Make DIY fun. Turn anyone into a tradesman. Point your phone at it and Ray walks you through it.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
+    <html lang="en" className={`${display.variable} ${sans.variable} ${mono.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );
