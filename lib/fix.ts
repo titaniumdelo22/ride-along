@@ -75,7 +75,7 @@ ${PARTS_DESC}`;
 function referenceBlocks(kind: "all" | "inside"): Anthropic.ContentBlockParam[] {
   const refs = referenceSet(kind);
   if (!refs.length) return [];
-  const out: Anthropic.ContentBlockParam[] = [{ type: "text", text: `REFERENCE: ${refs.length} photo(s) of THIS exact unit in known-good condition, nothing tampered with. This is how it is supposed to look. Compare the live photos against these; a difference (a wire off its screw, a connector hanging, a part moved or missing, a screw backed out) is the clue.` }];
+  const out: Anthropic.ContentBlockParam[] = [{ type: "text", text: `REFERENCE: ${refs.length} photo(s) of THIS exact unit with the back cover off and the power cord UNPLUGGED. The wiring and parts are untouched, so this is the correct layout. Because it was unplugged, the indicator lights are off in these photos; that is normal for the reference, not a fault. Compare the live photos against these; a difference (a wire off its screw, a connector hanging, a part moved or missing, a screw backed out) is the clue.` }];
   refs.forEach((r, i) => { out.push({ type: "text", text: `Reference ${i + 1}: ${r.what}` }); out.push(img(r.b64)); });
   out.push({ type: "text", text: "END OF REFERENCE. Everything below is live." });
   return out;

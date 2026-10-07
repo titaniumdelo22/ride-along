@@ -2,7 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 
 /**
- * Known-good reference photos of THIS unit (Clover D1, back cover off, nothing tampered with), taken 2026-10-07.
+ * Reference photos of THIS unit (Clover D1) taken 2026-10-07 with the back cover OFF and the power cord UNPLUGGED.
+ * Wiring and parts are untouched: this is the correct layout, but the unit is not running, so lights are off in them.
  * They are handed to the models as "this is how the inside is supposed to look" so a live view can be compared
  * against them: a wire off a screw, a connector hanging, a part moved. They do not say what is broken.
  */
