@@ -61,7 +61,10 @@ export default function Home() {
           ))}
         </ul>
 
-        <div className="mt-14 grid grid-cols-3 gap-3 font-mono text-[11px] uppercase tracking-wider text-bone/55">
+        <p className="mt-14 text-lg leading-snug text-bone/80">
+          Every job Ray checks on camera counts toward a certificate. <span className="text-bone">Learn at home. Get hired.</span>
+        </p>
+        <div className="mt-6 grid grid-cols-3 gap-3 font-mono text-[11px] uppercase tracking-wider text-bone/55">
           <div>
             <span className="block font-display text-5xl leading-none text-bone">01</span>Scan it
           </div>
@@ -69,7 +72,7 @@ export default function Home() {
             <span className="block font-display text-5xl leading-none text-bone">02</span>Ask Ray
           </div>
           <div>
-            <span className="block font-display text-5xl leading-none text-hazard">03</span>Level up
+            <span className="block font-display text-5xl leading-none text-hazard">03</span>Get certified
           </div>
         </div>
       </div>

@@ -78,3 +78,14 @@ body {
 @keyframes fillring {
   to { stroke-dashoffset: 0; }
 }
+/* Taps never zoom (no double-tap zoom on iPhone); text boxes at 16px+ so focusing one doesn't zoom either. */
+html,
+body {
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+}
+input,
+textarea,
+select {
+  font-size: max(16px, 1em);
+}

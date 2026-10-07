@@ -176,6 +176,7 @@ export default function CallPage() {
   const shotsRef = useRef<string[]>([]); // photos Ray takes as each step starts, for putting it back together later
   const fileRef = useRef<HTMLInputElement>(null);
   const clearedRef = useRef<Set<number>>(new Set());
+  const verifiedRef = useRef<Set<string>>(new Set()); // steps Ray saw done on camera (by title), the proof an employer can trust
   const jobRef = useRef(0);
   const handsFreeRef = useRef(true);
   const armedRef = useRef(false); // the first tap happened (browsers only open the mic after one)
@@ -256,6 +257,8 @@ export default function CallPage() {
   const [toasts, setToasts] = useState<BadgeId[]>([]);
   const [levelUp, setLevelUp] = useState<string | null>(null);
   const [badges, setBadges] = useState<BadgeId[]>([]);
+  // The certificate track: verified jobs and hours add up toward a credential, so learning at home leads to a job.
+  const [cert, setCert] = useState({ jobs: 0, verified: 0, minutes: 0 });
 
   useEffect(() => {
     xpRef.current = readXp();
@@ -279,6 +282,10 @@ export default function CallPage() {
       }
     } catch {}
     setXp(xpRef.current);
+    try {
+      const c = JSON.parse(localStorage.getItem("ra.cert") ?? "null");
+      if (c && typeof c.jobs === "number") setCert({ jobs: c.jobs, verified: c.verified || 0, minutes: c.minutes || 0 });
+    } catch {}
   }, []);
   useEffect(() => {
     try {
@@ -591,6 +598,7 @@ export default function CallPage() {
       comboRef.current = 0;
       earned.current = new Set();
       clearedRef.current = new Set();
+      verifiedRef.current = new Set();
       stepMistake.current = false;
       recentRef.current = [];
       talkRef.current = [];
@@ -797,6 +805,7 @@ export default function CallPage() {
         else if (w.safety && !rayTalking) speak(w.safety);
         if (w.stepDone && sameStep && !detour) {
           if ((plan.steps[at] as JobStep).surprise) unlock("curveball");
+          verifiedRef.current.add(plan.steps[at].title);
           stepCleared(at, plan.steps.length);
         }
       } catch {
@@ -922,6 +931,7 @@ export default function CallPage() {
       ``,
       `Next time: ${report.nextTime}`,
       `Skills: ${plan.steps.map((s) => s.skill).join(", ")}`,
+      `Verified by Ray: ${verifiedRef.current.size} of ${plan.steps.length} steps checked on camera`,
     ].join("\n");
   };
 
@@ -955,6 +965,15 @@ export default function CallPage() {
     burst(true);
     speak("That's the job. Clean work. You just leveled up your skills.");
     writeReport();
+    setCert((c) => {
+      // A job counts toward the certificate only if Ray saw at least half its steps done on camera.
+      const counts = plan ? verifiedRef.current.size * 2 >= plan.steps.length : false;
+      const n = { jobs: c.jobs + (counts ? 1 : 0), verified: c.verified + verifiedRef.current.size, minutes: c.minutes + Math.max(1, Math.round(elapsed / 60)) };
+      try {
+        localStorage.setItem("ra.cert", JSON.stringify(n));
+      } catch {}
+      return n;
+    });
     const end = capture();
     const shots = end ? [...shotsRef.current, end].slice(-8) : shotsRef.current;
     if (!jobBefores.length && shots.length >= 2) {
@@ -1839,6 +1858,22 @@ export default function CallPage() {
                 <div className="h-full rounded-full bg-gradient-to-r from-[#FFD23F] via-[#FF6B1A] to-[#FF3D6E] transition-all duration-1000" style={{ width: `${Math.round(lvl.pct * 100)}%` }} />
               </div>
             </div>
+          </div>
+          {/* Proof, not just points: what Ray saw on camera, and where it leads */}
+          <div className="mt-8 border-y border-bone/15 py-5">
+            <div className="font-mono text-[11px] font-bold uppercase tracking-[0.2em] text-[#22C55E]">✓ Verified on camera</div>
+            <div className="mt-1 font-display text-4xl uppercase leading-none">
+              Ray checked {verifiedRef.current.size} of {plan.steps.length} steps
+            </div>
+            <div className="mt-5 font-mono text-[11px] font-bold uppercase tracking-[0.2em] text-hazard">Certificate track · Appliance + HVAC-R Tech I</div>
+            <div className="mt-2 h-2 w-full bg-bone/15">
+              <div className="h-full bg-hazard transition-all duration-1000" style={{ width: `${Math.min(100, (Math.min(cert.jobs, 10) / 10) * 100)}%` }} />
+            </div>
+            <div className="mt-2 flex justify-between font-mono text-[11px] uppercase tracking-wider text-bone/60">
+              <span>{Math.min(cert.jobs, 10)} / 10 verified jobs</span>
+              <span>{cert.minutes < 60 ? `${cert.minutes} min` : `${(cert.minutes / 60).toFixed(1)} hrs`} / 40 hrs</span>
+            </div>
+            <p className="mt-3 text-sm text-bone/70">A job counts when Ray checks at least half of it on camera. Learn at home. Get hired.</p>
           </div>
           <h2 className="mt-8 text-lg font-black">Badges</h2>
           <div className="mt-3 grid grid-cols-3 gap-3">
