@@ -42,6 +42,22 @@ Every line of code was written by AI (Claude Code, Claude Opus 5.5). Titanium di
 
 Tagline (Titanium): "Making DIY fun. Basically turning everyone into a tradesman."
 
+28. "It's scanning the parts but not noticing it's not screwed together. Also some type of loading bar so people can see it's actively scanning. It should be minimal clicking: the initial scan should generate a build process, like scan the water cooler and suggest 'put it back together'." Claude added a check on the scan page (Claude looks at the same camera every 8 s: is it put back together?) that pops a hazard banner, "Not put back together: side and back panels off" with what still has to go back, and one tap starts Ray's rebuild (the plan starts on its own, no extra pages). A running bar and a sweeping scan line show it's actively scanning.
+
+## Philip's build (Scan page)
+Philip Mocanu built the Scan page (/glasses) in parallel with his own AI coding assistant. This is his work in the order he committed it, summarized from his commit messages (Philip can add his exact prompt wording here):
+1. Live part detection overlay on the camera with Gemini boxes, a parts list, and a still-photo fallback.
+2. Camera-motion tracking that keeps labels glued to parts between detections (keyframe matching so slow pans add up).
+3. A shorter box prompt for lower latency; steady labels (two sightings to appear, one miss tolerated, boxes slide instead of jump).
+4. Tap-to-start camera on phones, a bottom bar that fits a phone screen.
+5. A Parts / Tour / Fix drawer. Fix: say what's wrong, Claude Fable 5.1 writes the steps, the overlay lights only that step's parts, the camera watch auto-advances, mic for the problem and questions.
+6. The parts list rewritten for the real Clover D1 (17 parts, back cover off) with real photos as demo stills.
+7. Honesty rules for the planner: it is never told about the staged fault and diagnoses only from the camera and the learner's words; being unplugged is not a fault; never call a part broken unless clearly seen or reported.
+8. Adaptive Fix mode: Fable looks at every frame with the full story, marks anomalies in red, rewrites the remaining steps, asks for closer views; Opus watches fast and Fable re-plans when a look flags something.
+9. The overlay glides boxes and fades labels every frame; the tracker ignores noise; parts survive two misses.
+
+Tools Philip used: his AI coding assistant, Gemini (gemini-3.1-flash-lite for boxes), Claude Fable 5.1 (Fix plans), Claude Opus 5.5 (Fix watching).
+
 ## How it works
 - `lib/identify.ts`: "What am I looking at?" One camera frame in; the item, its parts pinned on the image (x, y), the tools to grab, the first 3 checks, a licensed-pro warning when it applies, and 1 or 2 safe missions out.
 - `lib/guide.ts`: the coach, all with structured JSON output.

@@ -205,6 +205,7 @@ export default function CallPage() {
   // The start, one question per page: your level (asked once), point at it, or pick the job.
   const [page, setPage] = useState<"level" | "point" | "job">("level");
   const [picked, setPicked] = useState<{ task: string; name: string } | null>(null); // a job tapped on the home page
+  const autoRef = useRef(false); // a handed-over job starts by itself, once
   const [task, setTask] = useState(MISSIONS[0].task);
   // Always on: read the label, and teach (ask what comes next) instead of just telling.
   const scanLabel = true;
@@ -1071,6 +1072,12 @@ export default function CallPage() {
     const id = setInterval(() => setLookT((t) => t + 1), 1000);
     return () => clearInterval(id);
   }, [looking, lookStage]);
+  // Minimal taps: a job handed over from the scan page (or home) starts on its own when the level is known.
+  useEffect(() => {
+    if (!picked || autoRef.current || phase !== "setup" || page === "level") return;
+    autoRef.current = true;
+    begin(picked.task);
+  }, [picked, phase, page, begin]);
   useEffect(() => {
     if (!curveball) return;
     const id = setTimeout(() => setCurveball(null), 6000);
@@ -1389,7 +1396,11 @@ export default function CallPage() {
                     localStorage.setItem("ra.level", l.id);
                   } catch {}
                   cue("coin");
-                  setPage("point");
+                  // A job handed over from the scan: go straight into it.
+                  if (picked && !autoRef.current) {
+                    autoRef.current = true;
+                    begin(picked.task, undefined);
+                  } else setPage("point");
                 }}
                 className="flex w-full items-center gap-4 py-5 text-left active:opacity-60"
               >

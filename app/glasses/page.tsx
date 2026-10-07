@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import ConditionBanner from "@/components/ConditionBanner";
 import GlassesOverlay, { type OverlayPart, type OverlayAnomaly } from "@/components/GlassesOverlay";
 import { PARTS, byLabel } from "@/lib/parts";
 import { MotionTracker } from "@/lib/motion";
@@ -67,7 +68,7 @@ export default function GlassesPage() {
       streamRef.current = stream;
       const v = videoRef.current!;
       v.srcObject = stream;
-      await v.play();
+      await v.play().catch(() => {});
       setNeedTap(false);
       setStatus("Looking…");
       return true;
@@ -107,7 +108,7 @@ export default function GlassesPage() {
         streamRef.current = stream;
         const v = videoRef.current!;
         v.srcObject = stream;
-        await v.play();
+        await v.play().catch(() => {});
         setStatus("Demo photo (no camera)");
         v.addEventListener("emptied", () => clearInterval(iv), { once: true });
       };
@@ -407,6 +408,9 @@ export default function GlassesPage() {
         <video ref={videoRef} playsInline muted className="h-full w-full object-cover" />
         {view.w > 0 && <GlassesOverlay parts={visibleParts} view={view} drift={drift} selected={mode === "fix" ? null : selected} focus={stepParts} anomalies={mode === "fix" ? anomalies : []} onTap={onTap} />}
       </div>
+
+      {/* Is it put back together? (Ray's check, from the same camera) */}
+      <ConditionBanner />
 
       {/* top bar */}
       <div className="absolute top-0 inset-x-0 p-3 flex items-center gap-2 bg-gradient-to-b from-black/70 to-transparent">
