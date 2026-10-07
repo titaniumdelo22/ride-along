@@ -5,6 +5,7 @@ import ConditionBanner from "@/components/ConditionBanner";
 import GlassesOverlay, { type OverlayPart, type OverlayAnomaly } from "@/components/GlassesOverlay";
 import { PARTS, byLabel } from "@/lib/parts";
 import { MotionTracker } from "@/lib/motion";
+import { speak as sayAloud, isSpeaking, stopSpeaking } from "@/lib/voice";
 import ScanDrawer, { type Mode, type FixPhase } from "@/components/ScanDrawer";
 import type { FixPlan, FixWatch, Replan, Intake } from "@/lib/fix";
 
@@ -280,16 +281,7 @@ export default function GlassesPage() {
     return () => { stop = true; };
   }, [grab]);
 
-  const speak = (text: string) => {
-    if (typeof window === "undefined" || !window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.rate = 1.02;
-    const voices = window.speechSynthesis.getVoices();
-    const pick = voices.find((v) => /Samantha|Daniel|Google US English|Karen|Alex/i.test(v.name)) ?? voices[0];
-    if (pick) u.voice = pick;
-    window.speechSynthesis.speak(u);
-  };
+  const speak = (text: string) => { void sayAloud(text); };
 
   // Tour: say each stop as you reach it
   useEffect(() => {
@@ -320,7 +312,7 @@ export default function GlassesPage() {
         await new Promise((r) => setTimeout(r, 1200));
         const pl = planRef.current;
         if (modeRef.current !== "fix" || !pl || pausedRef.current) continue;
-        if (typeof window !== "undefined" && window.speechSynthesis?.speaking && !userSaidRef.current) continue;
+        if (isSpeaking() && !userSaidRef.current) continue;
         const frame = grab(768, 0.7);
         if (!frame) continue;
         const idx = stepRef.current;
@@ -413,7 +405,7 @@ export default function GlassesPage() {
     const W = window as unknown as { SpeechRecognition?: new () => Recognition; webkitSpeechRecognition?: new () => Recognition };
     const Ctor = W.SpeechRecognition ?? W.webkitSpeechRecognition;
     if (!Ctor) { setErr("Voice input isn't available in this browser. Type instead."); return; }
-    window.speechSynthesis?.cancel();
+    stopSpeaking();
     const r = new Ctor();
     r.lang = "en-US"; r.interimResults = false;
     setListening(true);
