@@ -65,9 +65,8 @@ function normalize(items: Raw[], withMask: boolean): Part[] {
 }
 
 export async function detectBoxes(frame: string): Promise<Part[]> {
-  const prompt = `This is a live camera view of a water cooler (Clover D1). Detect every part from this list that is clearly visible: ${LIST}.
-Return a JSON list, each entry {"box_2d":[ymin,xmin,ymax,xmax] on a 0-1000 scale, "label": exactly one label from the list}.
-Each label at most once, tight boxes, skip parts that are not visible, never invent parts.`;
+  const prompt = `Live camera view of a water cooler. Detect the visible parts from this list: ${LABELS.join(", ")}.
+JSON list of {"box_2d":[ymin,xmin,ymax,xmax] 0-1000, "label"}. Labels only from the list, each once, tight boxes, skip what is not visible.`;
   return normalize(parse(await gemini(BOX_MODEL, frame, prompt, true)), false);
 }
 
