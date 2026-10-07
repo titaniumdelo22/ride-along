@@ -1,0 +1,205 @@
+import Anthropic from "@anthropic-ai/sdk";
+import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import { z } from "zod";
+
+/**
+ * Ride Along's coach: a journeyman who watches the live camera and talks the
+ * learner through a hands-on job, one step at a time.
+ *
+ * Two calls:
+ *   plan()  - read the task (and the label, if the camera sees one), write the steps.
+ *   watch() - look at the newest camera frame, decide if the current step is done,
+ *             say something only when it helps, point at the part that matters,
+ *             and call out anything unsafe.
+ *
+ * With no API credentials (ANTHROPIC_API_KEY unset) both fall back to a scripted
+ * walkthrough of a water dispenser filter change, so the app always demos.
+ */
+
+export const MODEL = "claude-opus-5-5";
+
+export const Step = z.object({
+  icon: z.string().describe("ONE emoji that pictures the action, e.g. 🔌 🔧 🔦 🧽 📋 ⚡ 💧 👀"),
+  title: z.string().describe("2 to 4 words, e.g. 'Turn off the water'"),
+  instruction: z.string().describe("One or two short spoken sentences telling the learner exactly what to do"),
+  check: z.string().describe("What the coach must SEE in the camera to know this step is done"),
+  why: z.string().describe("One sentence on why a pro does it this way"),
+  safety: z.string().nullable().describe("A safety warning for this step, or null"),
+  skill: z.string().describe("The trade skill this step trains, 2 to 4 words"),
+});
+export type Step = z.infer<typeof Step>;
+
+export const Plan = z.object({
+  product: z.object({
+    name: z.string().describe("What the item is, e.g. 'Countertop water dispenser'"),
+    model: z.string().nullable().describe("Model number if readable on a label, else null"),
+    serial: z.string().nullable().describe("Serial number if readable on a label, else null"),
+  }),
+  trade: z.string().describe("The trade this belongs to, e.g. Plumbing, HVAC, Appliance repair, Electrical"),
+  tools: z.array(z.string()).describe("Tools and supplies needed, short names"),
+  steps: z.array(Step).describe("4 to 8 steps, in order"),
+  intro: z.string().describe("What the coach says first, one or two warm sentences, like a pro on a video call"),
+});
+export type Plan = z.infer<typeof Plan>;
+
+export const Watch = z.object({
+  see: z.string().describe("One short sentence: what is in the camera right now"),
+  stepDone: z.boolean().describe("True only if the camera clearly shows the current step's check is met"),
+  say: z.string().nullable().describe("What to say out loud now (1 or 2 short sentences), or null to stay quiet"),
+  point: z
+    .object({
+      x: z.number().describe("0 to 1 from the left edge of the image"),
+      y: z.number().describe("0 to 1 from the top edge of the image"),
+      label: z.string().describe("2 to 4 words naming the part, e.g. 'Shutoff valve'"),
+    })
+    .nullable()
+    .describe("Where the part being talked about is in the image, or null"),
+  aim: z
+    .enum(["closer", "farther", "left", "right", "up", "down"])
+    .nullable()
+    .describe("Which way the learner should move the camera so you can see what you need, or null if the view is fine"),
+  safety: z.string().nullable().describe("An urgent safety warning if something unsafe is happening, else null"),
+  mistake: z.string().nullable().describe("A mistake the learner just made, in a few words, else null"),
+});
+export type Watch = z.infer<typeof Watch>;
+
+export type WatchInput = {
+  frame: string | null; // base64 JPEG, no data: prefix
+  task: string;
+  plan: Plan;
+  current: number;
+  teach: boolean;
+  recent: string[]; // what the coach said lately, newest last
+  userSaid: string | null;
+};
+
+const COACH = `You are a patient journeyman with 25 years in the trades, on a live video call with a learner (an apprentice or a new technician). You can see their camera. You teach the way pros teach on the job: short, plain, hands-on, one thing at a time, and you never let them do something unsafe.
+- The learner's hands are busy and they may not read the screen: everything important must be SAID, short and plain. Talk like a person on a call, not a manual. One or two short sentences.
+- If you can't see what you need, tell them where to move the camera (aim) and say it.
+- Stay quiet when nothing needs saying (say: null). Never repeat yourself.
+- Only mark a step done when the camera clearly shows it.
+- Point at the exact part you mean when it helps.
+- Safety beats speed, always.`;
+
+export function haveCredentials(): boolean {
+  return !!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
+}
+
+let client: Anthropic | null = null;
+function anthropic(): Anthropic {
+  if (!client) client = new Anthropic();
+  return client;
+}
+
+function imageBlock(frame: string) {
+  return { type: "image" as const, source: { type: "base64" as const, media_type: "image/jpeg" as const, data: frame } };
+}
+
+export async function plan(task: string, frame: string | null): Promise<Plan> {
+  if (!haveCredentials()) return MOCK_PLAN;
+  const content: Anthropic.ContentBlockParam[] = [];
+  if (frame) content.push(imageBlock(frame));
+  content.push({
+    type: "text",
+    text: `The learner says they are working on: "${task || "the item in the camera"}".
+${frame ? "The camera frame above may show the item and its label; read the model and serial number if you can." : ""}
+Write the step-by-step plan a journeyman would walk them through, hands-on, in order, with what you'll check on camera for each step.`,
+  });
+  const res = await anthropic().messages.parse({
+    model: MODEL,
+    max_tokens: 4000,
+    system: COACH,
+    output_config: { effort: "medium", format: zodOutputFormat(Plan) },
+    messages: [{ role: "user", content }],
+  });
+  if (!res.parsed_output) throw new Error("no plan");
+  return res.parsed_output;
+}
+
+export async function watch(input: WatchInput): Promise<Watch> {
+  if (!haveCredentials()) return mockWatch(input);
+  const step = input.plan.steps[input.current];
+  const content: Anthropic.ContentBlockParam[] = [];
+  if (input.frame) content.push(imageBlock(input.frame));
+  content.push({
+    type: "text",
+    text: `Job: ${input.plan.product.name}${input.plan.product.model ? ` (model ${input.plan.product.model})` : ""}.
+Current step ${input.current + 1} of ${input.plan.steps.length}: "${step.title}". Instruction: ${step.instruction}
+Done when the camera shows: ${step.check}
+${step.safety ? `Safety for this step: ${step.safety}` : ""}
+${input.teach ? "TEACH MODE: when a step finishes, before telling them the next one, ask what they think comes next and why. Praise right answers, correct wrong ones kindly." : ""}
+What you said lately: ${input.recent.length ? input.recent.map((s) => `"${s}"`).join(" ") : "(nothing yet)"}
+${input.userSaid ? `The learner just said: "${input.userSaid}". Answer them directly.` : "The learner hasn't said anything new."}
+Look at the camera frame and respond.`,
+  });
+  const res = await anthropic().messages.parse({
+    model: MODEL,
+    max_tokens: 1500,
+    system: COACH,
+    output_config: { effort: "low", format: zodOutputFormat(Watch) },
+    messages: [{ role: "user", content }],
+  });
+  if (!res.parsed_output) throw new Error("no watch");
+  return res.parsed_output;
+}
+
+// ── Practice mode: a scripted water dispenser filter change ─────────────────
+
+export const MOCK_PLAN: Plan = {
+  product: { name: "Clover water cooler", model: "D1", serial: "14123673" },
+  trade: "Appliance and refrigeration (HVAC-R)",
+  tools: ["Phone flashlight", "Soft brush or vacuum with a brush head", "Towel"],
+  intro: "Hey, I've got you. I can read the label: Clover D1, 120 volts, R134a refrigerant. When one of these stops getting cold, the first suspect is airflow. Let's check it the safe way.",
+  steps: [
+    { icon: "🔌", title: "Unplug the cooler", instruction: "Pull the plug out of the wall before you touch anything behind it.", check: "The plug is out of the outlet", why: "There's 120 volts to the compressor and a hot tank heater in there.", safety: "Never reach into the back of a plugged-in unit. The hot tank can also burn you.", skill: "Lockout and safety" },
+    { icon: "🏷️", title: "Read the data plate", instruction: "Show me the label on the back: model, volts, amps, refrigerant.", check: "The model and serial label is readable in the camera", why: "The plate tells you the refrigerant, the amps it should draw and the pressures it's built for, before you diagnose anything.", safety: null, skill: "Reading a data plate" },
+    { icon: "🔦", title: "Look at the condenser coils", instruction: "Shine a light on the black coils on the back. See all that gray fuzz? That's dust blocking the heat from getting out.", check: "The condenser coils are in view", why: "A fridge cools by dumping heat through these coils. Dust is a blanket on them, so the water never gets cold.", safety: null, skill: "Spotting airflow problems" },
+    { icon: "🧽", title: "Clean the coils", instruction: "Brush the coils gently, top to bottom, following the tubes. Don't bend the wires.", check: "The coils look clean, with no gray dust", why: "Going with the tubes lifts the dust off instead of packing it into the fins.", safety: "Coils can have sharp edges. Go slow.", skill: "Condenser cleaning" },
+    { icon: "📋", title: "Find it on the wiring diagram", instruction: "Now show me the wiring sticker. Point at the cold water thermostat.", check: "The wiring diagram sticker is in view", why: "The thermostat is the switch that tells the compressor to run. Knowing where it sits on the diagram is how you trace a no-cool problem.", safety: null, skill: "Reading a wiring diagram" },
+    { icon: "⚡", title: "Power on and listen", instruction: "Push it back, leave a few inches of space behind it, and plug it in. Listen for the compressor to start.", check: "The cooler is plugged in and the cold lamp is on", why: "A few inches of space lets the clean coils breathe. The hum is the compressor starting.", safety: null, skill: "Startup and verification" },
+  ],
+};
+
+const MOCK_POINTS = [
+  { x: 0.7, y: 0.85, label: "Power cord" },
+  { x: 0.55, y: 0.45, label: "Data plate" },
+  { x: 0.6, y: 0.6, label: "Condenser coils" },
+  { x: 0.6, y: 0.6, label: "Condenser coils" },
+  { x: 0.55, y: 0.4, label: "Cold water thermostat" },
+  { x: 0.5, y: 0.75, label: "Cold lamp" },
+];
+
+let mockTicks = 0;
+let mockStep = -1;
+function mockWatch(input: WatchInput): Watch {
+  if (mockStep !== input.current) {
+    mockStep = input.current;
+    mockTicks = 0;
+  }
+  mockTicks++;
+  const step = input.plan.steps[input.current];
+  const point = MOCK_POINTS[input.current] ?? null;
+  if (input.userSaid) {
+    return { see: "The learner is asking a question.", stepDone: false, say: `Good question. ${step.why} You're doing fine, take your time.`, point, aim: null, safety: null, mistake: null };
+  }
+  if (mockTicks === 1 && input.current === 1) {
+    return { see: "The label is too far away to read.", stepDone: false, say: "Get a little closer to that label so I can read it.", point, aim: "closer", safety: null, mistake: null };
+  }
+  if (mockTicks === 1 && input.current === 2) {
+    return { see: "Looking at the side of the unit.", stepDone: false, say: "Swing around to the back, where the black coils are.", point: null, aim: "right", safety: null, mistake: null };
+  }
+  if (mockTicks === 1) return { see: "The unit is in view.", stepDone: false, say: null, point, aim: null, safety: null, mistake: null };
+  if (mockTicks === 2 && input.current === 3) {
+    return { see: "Brushing across the coils.", stepDone: false, say: "Easy, you're brushing across the tubes and packing dust in. Go top to bottom, with the tubes.", point, aim: null, safety: null, mistake: "Brushed across the coils instead of with them" };
+  }
+  if (mockTicks >= 4) {
+    const next = input.plan.steps[input.current + 1];
+    const say = next
+      ? input.teach
+        ? `Nice, that's done. What do you think comes next, and why?`
+        : `That's it, nice work. Next: ${next.instruction}`
+      : "That's the job. Clean coils, good airflow. Give it twenty minutes and that water will be cold.";
+    return { see: "The step is done.", stepDone: true, say, point: next ? MOCK_POINTS[input.current + 1] ?? null : null, aim: null, safety: null, mistake: null };
+  }
+  return { see: "Working on it.", stepDone: false, say: null, point, aim: null, safety: null, mistake: null };
+}
