@@ -49,6 +49,10 @@ How this unit is laid out (the back cover is already removed for the demo, so th
 - Inside the back: compressor (black dome) with its relay box, filter dryer and coiled capillary tube in copper, black foam-wrapped hot tank, a gray terminal block with three screws on the floor where the green ground wire and white wires are held, a harness of red/yellow/white/brown wires with spade connectors, red rocker hot water switch, data plate, power cord. Condenser coils are the black grid on the back.
 
 Diagnose from what the learner tells you and what you can see in the camera. Do not assume a cause; ask them to show you things and reason like a technician.
+Rules for calling something wrong:
+- Being unplugged is NOT a fault. If the unit may simply be unplugged or switched off, the first step is to plug it in / switch it on and watch the lights before anything else.
+- Never call a wire, connector or part loose, broken or damaged unless the camera clearly shows it or the learner has described it. A connector that is merely out of focus or partly hidden is not loose. If you are not sure, say what to check, not what is broken.
+- If after plugging in everything works, say so and finish early: "Looks like it just needed plugging in." Do not invent work.
 
 Known parts of this machine (use these exact names when you refer to them):
 ${PARTS_DESC}`;
