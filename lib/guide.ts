@@ -1,6 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
+import { PARTS } from "./parts";
+
+// Philip's map of the demo unit, so Ray knows this exact machine (the model ignores it for anything else).
+const UNIT = `If the item is a Clover D1 countertop hot-and-cold water cooler (serial 14123673), here is where its parts are:
+${PARTS.map((p) => `- ${p.label}: ${p.hint}`).join("\n")}`;
 
 /**
  * Ride Along's coach: a journeyman who watches the live camera and talks the
@@ -171,6 +176,8 @@ export async function plan(task: string, frame: string | null, level: Level = "n
     text: `The learner says they are working on: "${task || "the item in the camera"}".
 ${frame ? "The camera frame above may show the item and its label; read the model and serial number if you can." : ""}
 ${LEVEL_PLAN[level]}
+${UNIT}
+If it's taken apart (covers off, screws out), this job is putting it back together: inside parts first (tubes, wires, connectors seated), then covers and every screw, then a leak check and a power-on test.
 Write the step-by-step plan a journeyman would walk them through, hands-on, in order, with what you'll check on camera for each step, and every tool they need before they start.
 ${befores.length ? `PUTTING IT BACK TOGETHER: the ${befores.length} before photos were taken while it came apart, in order (photo 0 first, before anything was removed). Write the steps to put it back together in reverse, one part at a time, and set each step's photo to the index of the before photo that shows how that part should look. Cover every tube on the right fitting, every screw back in, then a leak check and a power-on test.` : ""}
 They may already be partway through ("I'm stuck at...", or the camera shows it half done). Then don't start over: write the whole job, set startAt to the step they're on or stuck at, and in the intro say where you're picking up. If a safety step before it (power off, water off) isn't clearly done, make the step at startAt ONE quick check that it is, right before the step they're stuck on.`,

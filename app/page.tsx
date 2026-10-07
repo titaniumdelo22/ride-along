@@ -2,6 +2,7 @@ import Link from "next/link";
 import RayFace from "./call/RayFace";
 
 const JOBS = [
+  { name: "Put it back together", task: "I took this apart. Help me put it back together the right way, every screw and tube where it goes.", xp: 500 },
   { name: "Mount a TV", task: "I want to mount my TV on the wall. Teach me to do it right.", xp: 300 },
   { name: "Fix a leaky faucet", task: "My kitchen faucet drips. Teach me to fix it.", xp: 350 },
   { name: "Cooler won't cool", task: "This water cooler has an out of order sign. I know nothing about it. Help me fix it.", xp: 400 },

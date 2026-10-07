@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import { haveCredentials, MODEL, type Level } from "./guide";
+import { PARTS } from "./parts";
 
 /**
  * "What am I looking at?": for people who don't know where to start.
@@ -55,13 +56,17 @@ const SYSTEM = `You are a patient journeyman with 25 years across the trades (HV
 - Point at ONE thing first (focus): the most important part to look at. Don't make them look at five things at once. No jargon; if you must use a trade word, explain it in 3 words.
 - Be honest about danger: say plainly when something is a licensed pro's job, and what they CAN safely do.
 - Only pin parts you can actually see. If unsure, say what it most likely is.
-- Notice what condition it's in right now: covers off, taken apart, screws out, parts missing, unplugged, wet, burnt. Say that FIRST, and let it drive what you suggest (taken apart means: put it back together).`;
+- Notice what condition it's in right now: covers off, taken apart, screws out, parts missing, unplugged, wet, burnt. Say that FIRST.
+- If it's taken apart, your FIRST mission is putting it back together, and focus is the first thing that goes back on.`;
+
+const UNIT = `If the item is a Clover D1 countertop hot-and-cold water cooler, here is where its parts are:
+${PARTS.map((p) => `- ${p.label}: ${p.hint}`).join("\n")}`;
 
 let client: Anthropic | null = null;
 
 export type IdentifyMode = "what" | "parts";
 
-const PARTS = `PARTS CHECK: they took something apart and laid out the screws and pieces. Identify EACH screw, bolt, nut, washer, clip, bracket, fitting or panel you can see.
+const PARTS_CHECK = `PARTS CHECK: they took something apart and laid out the screws and pieces. Identify EACH screw, bolt, nut, washer, clip, bracket, fitting or panel you can see.
 - Pin each kind once (x, y on the image). label: a letter and the type in 1 to 3 words, e.g. "A: Phillips pan-head". If several are identical, pin one and give the count.
 - what: the type and where it goes, under 10 words, e.g. "Short sheet-metal screw · back panel, 4 of these". Say self-tapping, machine or wood screw, and short or long, when you can tell.
 - tools: the exact screwdriver or bit sizes they need (e.g. "Phillips #2", "1/4 in nut driver").
@@ -84,7 +89,8 @@ export async function identify(frame: string | null, problem: string, level: Lev
     type: "text",
     text: `${frame ? "This is what their camera sees." : "There's no camera image, go from their words."}
 ${problem ? `They say: "${problem}".` : "They didn't describe a problem; they just want to know what this is."}
-They are a ${level}. ${mode === "parts" ? PARTS : "What are they looking at, and where should they start?"}`,
+They are a ${level}. ${mode === "parts" ? PARTS_CHECK : "What are they looking at, and where should they start?"}
+${UNIT}`,
   });
   client ??= new Anthropic();
   const res = await client.messages.parse({

@@ -419,7 +419,7 @@ export default function GlassesPage() {
       <div className="absolute right-3 top-12 flex gap-1.5 text-[11px]">
         <button onClick={() => setPaused((p) => !p)} className="rounded-full bg-black/50 px-2.5 py-1 font-semibold backdrop-blur">{paused ? "Resume" : "Freeze"}</button>
         <button onClick={() => setTracking((t) => !t)} className={`rounded-full px-2.5 py-1 font-semibold backdrop-blur ${tracking ? "bg-black/50" : "bg-black/30 text-white/50"}`}>Track</button>
-        <Link href="/call" className="rounded-full bg-hazard px-4 py-1.5 font-display text-sm uppercase tracking-wide text-ink">📞 Ask Ray</Link>
+        <Link href={`/call?task=${encodeURIComponent("I took this apart. Help me put it back together the right way, every screw and tube where it goes.")}&name=${encodeURIComponent("Put it back together")}`} className="rounded-full bg-hazard px-4 py-1.5 font-display text-sm uppercase tracking-wide text-ink">📞 Ask Ray</Link>
       </div>
 
       <ScanDrawer mode={mode} setMode={(m) => { setMode(m); if (m !== "tour" && m !== "fix") setSelected(null); if (m === "tour") setSelected(PARTS[tourIndex].label); }}

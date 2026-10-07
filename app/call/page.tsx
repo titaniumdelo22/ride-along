@@ -1620,9 +1620,9 @@ export default function CallPage() {
               {found.missions[0] && (
                 <button
                   onClick={fixIt}
-                  className="mt-5 flex h-16 w-full items-center justify-center gap-2 bg-hazard text-ink font-display uppercase tracking-wide text-xl font-black active:scale-[.98]"
+                  className="mt-5 flex h-16 w-full items-center justify-between gap-2 px-6 text-left bg-hazard text-ink font-display uppercase tracking-wide text-xl font-black active:scale-[.98]"
                 >
-                  {foundMode === "parts" ? "🔁 Put it back together" : "📞 Fix it with Ray"}
+                  {foundMode === "parts" ? "Put it back together" : found.missions[0]?.title ?? "Fix it with Ray"} <span>→</span>
                 </button>
               )}
               {foundMode === "parts" && showAll && found.parts.length > 0 && (
