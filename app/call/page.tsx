@@ -160,6 +160,8 @@ export default function CallPage() {
   const questionsRef = useRef<string[]>([]);
   const redoneRef = useRef<string[]>([]);
   const surprisesRef = useRef<string[]>([]);
+  const shotsRef = useRef<string[]>([]); // photos Ray takes as each step starts, for putting it back together later
+  const fileRef = useRef<HTMLInputElement>(null);
   const clearedRef = useRef<Set<number>>(new Set());
   const jobRef = useRef(0);
   const handsFreeRef = useRef(true);
@@ -201,6 +203,10 @@ export default function CallPage() {
   const [earOn, setEarOn] = useState(false);
   const [heard, setHeard] = useState<string | null>(null);
   const [curveball, setCurveball] = useState<string | null>(null);
+  // Before photos: how it looked as it came apart (from a job with Ray, or added from the camera roll).
+  const [befores, setBefores] = useState<string[]>([]);
+  const [jobBefores, setJobBefores] = useState<string[]>([]);
+  const [zoom, setZoom] = useState<string | null>(null);
   const [found, setFound] = useState<Identify | null>(null);
   const [looking, setLooking] = useState(false);
   const [snap, setSnap] = useState<{ src: string; w: number; h: number } | null>(null);
@@ -228,6 +234,10 @@ export default function CallPage() {
 
   useEffect(() => {
     xpRef.current = readXp();
+    try {
+      const b = JSON.parse(localStorage.getItem("ra.befores") ?? "[]");
+      if (Array.isArray(b)) setBefores(b.filter((x) => typeof x === "string").slice(0, 8));
+    } catch {}
     try {
       const saved = localStorage.getItem("ra.level");
       if (saved === "newbie" || saved === "intermediate" || saved === "advanced") {
@@ -360,7 +370,8 @@ export default function CallPage() {
   }, [stopEar, startEar]);
 
   // ── The game's moments ────────────────────────────────────────────────────
-  const award = useCallback((amount: number, lines: string[]) => {
+  // quiet: add the XP without the big pop-up (a badge already gets its own toast).
+  const award = useCallback((amount: number, lines: string[], quiet = false) => {
     const before = xpRef.current;
     const after = before + amount;
     xpRef.current = after;
@@ -374,7 +385,7 @@ export default function CallPage() {
       }, 900);
     }
     setJobXp((j) => j + amount);
-    setPopup({ amount, lines, key: Date.now() });
+    if (!quiet) setPopup({ amount, lines, key: Date.now() });
     cue("coin");
   }, []);
 
@@ -388,7 +399,7 @@ export default function CallPage() {
         cue("badge");
         burst();
       }, 300);
-      award(25, [`${BADGES[id].icon} ${BADGES[id].name}`]);
+      award(25, [`${BADGES[id].icon} ${BADGES[id].name}`], true);
     },
     [award]
   );
@@ -417,6 +428,8 @@ export default function CallPage() {
         return;
       }
       clearedRef.current.add(index);
+      const shot = capture();
+      if (shot) shotsRef.current = [...shotsRef.current, shot].slice(-8);
       const clean = !stepMistake.current;
       const next = clean ? comboRef.current + 1 : 0;
       comboRef.current = next;
@@ -440,8 +453,45 @@ export default function CallPage() {
       if (index + 1 >= total) setTimeout(() => setPhase("done"), 1800);
       else setCurrent(index + 1);
     },
-    [award, unlock]
+    [award, unlock, capture]
   );
+
+  // The before photo for a step, when putting it back together.
+  const refPhoto = useCallback(
+    (i: number): string | null => {
+      const n = plan?.steps[i]?.photo;
+      return n != null && jobBefores[Math.round(n)] ? jobBefores[Math.round(n)] : null;
+    },
+    [plan, jobBefores]
+  );
+
+  // Before photos from the camera roll (taken while it came apart), in the order they were taken.
+  const addPhotos = async (files: FileList | null) => {
+    if (!files?.length) return;
+    const list = Array.from(files)
+      .sort((a, b) => a.lastModified - b.lastModified)
+      .slice(0, 8);
+    const out: string[] = [];
+    for (const f of list) {
+      try {
+        const bmp = await createImageBitmap(f);
+        const w = Math.min(768, bmp.width);
+        const h = Math.round((bmp.height / bmp.width) * w);
+        const c = document.createElement("canvas");
+        c.width = w;
+        c.height = h;
+        c.getContext("2d")?.drawImage(bmp, 0, 0, w, h);
+        const b64 = c.toDataURL("image/jpeg", 0.6).split(",")[1];
+        if (b64) out.push(b64);
+      } catch {}
+    }
+    if (!out.length) return;
+    setBefores(out);
+    cue("coin");
+    try {
+      localStorage.setItem("ra.befores", JSON.stringify(out));
+    } catch {}
+  };
 
   // ── Plan ──────────────────────────────────────────────────────────────────
   // Start where they are: if they're already partway, the steps before it count as done (no XP for them).
@@ -452,7 +502,7 @@ export default function CallPage() {
     clearedRef.current = new Set(Array.from({ length: at }, (_, i) => i));
   }, []);
 
-  const begin = useCallback(async (override?: string, known?: Kit) => {
+  const begin = useCallback(async (override?: string, known?: Kit, photos?: string[]) => {
     setError(null);
     setPhase("planning");
     // Unlock speech and sound on iOS inside the tap.
@@ -461,7 +511,8 @@ export default function CallPage() {
       tone(1, 0, 0.01, "sine", 0.0001);
     } catch {}
     const job = ++jobRef.current;
-    const body = JSON.stringify({ task: override ?? task, level, frame: scanLabel ? capture() : null });
+    const body = JSON.stringify({ task: override ?? task, level, frame: scanLabel ? capture() : null, befores: photos ?? [] });
+    setJobBefores(photos ?? []);
     const post = (path: string) => fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body }).then((r) => r.json());
     // Two calls at once: the gear list comes back in seconds, the steps keep cooking while they gear up.
     setPlan(null);
@@ -585,10 +636,12 @@ export default function CallPage() {
   const go = useCallback(() => {
     if (!plan) return;
     startedAt.current = Date.now();
+    const first = capture();
+    shotsRef.current = first ? [first] : [];
     setPhase("guiding");
     award(10 * plan.tools.length, ["🎒 Geared up"]);
     speak(`${plan.intro} ${current > 0 ? `Picking up at step ${current + 1}` : "Step one"}: ${plan.steps[current].instruction}`);
-  }, [plan, current, award, speak]);
+  }, [plan, current, award, speak, capture]);
 
   // ── Watch loop ────────────────────────────────────────────────────────────
   const tick = useCallback(
@@ -607,7 +660,7 @@ export default function CallPage() {
         const res = await fetch("/api/watch", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ frame: capture(), task, level, plan, current, teach, recent: recentRef.current, userSaid, surprises: surprisesRef.current }),
+          body: JSON.stringify({ frame: capture(), task, level, plan, current, teach, recent: recentRef.current, userSaid, surprises: surprisesRef.current, ref: refPhoto(current) }),
         });
         const w = (await res.json()) as Watch & { error?: string };
         if (w.error) return;
@@ -657,7 +710,7 @@ export default function CallPage() {
         }
       }
     },
-    [plan, capture, task, level, current, teach, speak, stepCleared, award, unlock]
+    [plan, capture, task, level, current, teach, speak, stepCleared, award, unlock, refPhoto]
   );
   useEffect(() => {
     tickRef.current = tick;
@@ -761,6 +814,14 @@ export default function CallPage() {
     burst(true);
     speak("That's the job. Clean work. You just leveled up your skills.");
     writeReport();
+    const end = capture();
+    const shots = end ? [...shotsRef.current, end].slice(-8) : shotsRef.current;
+    if (!jobBefores.length && shots.length >= 2) {
+      setBefores(shots);
+      try {
+        localStorage.setItem("ra.befores", JSON.stringify(shots));
+      } catch {}
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase]);
 
@@ -1002,7 +1063,7 @@ export default function CallPage() {
       )}
 
       {/* +XP */}
-      {popup && (
+      {popup && !levelUp && (
         <div key={popup.key} onAnimationEnd={() => setPopup(null)} className="pointer-events-none absolute inset-x-0 top-[38%] animate-[floatUp_1.8s_ease-out_forwards] text-center">
           <div className="text-6xl font-black text-[#FFD23F] drop-shadow-[0_4px_0_rgba(0,0,0,.5)]">+{popup.amount} XP</div>
           <div className="mt-1 space-x-2 text-sm font-bold">
@@ -1038,6 +1099,19 @@ export default function CallPage() {
       )}
 
       {/* Safety */}
+      {phase === "guiding" && refPhoto(current) && (
+        <button onClick={() => setZoom(refPhoto(current))} className="absolute right-4 top-36 w-28 overflow-hidden rounded-2xl border-2 border-white shadow-2xl">
+          <img src={`data:image/jpeg;base64,${refPhoto(current)}`} alt="How it looked before" className="h-32 w-full object-cover" />
+          <span className="block bg-white py-1 text-center text-[11px] font-black uppercase tracking-wide text-black">How it looked</span>
+        </button>
+      )}
+      {zoom && (
+        <button onClick={() => setZoom(null)} className="absolute inset-0 z-30 bg-black/90 p-4">
+          <img src={`data:image/jpeg;base64,${zoom}`} alt="How it looked before" className="h-full w-full object-contain" />
+          <span className="absolute inset-x-0 top-6 text-center text-sm font-bold text-white/70">How it looked before · tap to close</span>
+        </button>
+      )}
+
       {curveball && phase === "guiding" && !safety && (
         <div key={curveball} className="absolute inset-x-4 top-36 flex animate-[rise_.4s_ease-out] items-center gap-3 rounded-3xl bg-[#F59E0B] px-4 py-3 text-black shadow-2xl">
           <span className="text-4xl">🚧</span>
@@ -1111,7 +1185,36 @@ export default function CallPage() {
           </button>
           <h1 className="text-4xl font-black leading-[1.05]">What&apos;s the job?</h1>
           {error && <p className="mt-3 text-sm text-red-300">{error}</p>}
+          <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => addPhotos(e.target.files)} />
           <div className="mt-5 divide-y divide-white/10 border-y border-white/10">
+            {befores.length > 0 && (
+              <button
+                onClick={() => {
+                  const t = "Help me put this back together the way it was in my before photos.";
+                  setTask(t);
+                  begin(t, undefined, befores);
+                }}
+                className="flex w-full items-center gap-4 py-4 text-left active:opacity-60"
+              >
+                <span className="text-3xl">🔁</span>
+                <span className="flex-1 leading-tight">
+                  <span className="block text-xl font-extrabold">Put it back together</span>
+                  <span className="text-sm text-white/55">Using your {befores.length} before photos</span>
+                </span>
+                <span className="flex -space-x-3">
+                  {befores.slice(0, 3).map((b, i) => (
+                    <img key={i} src={`data:image/jpeg;base64,${b}`} alt="" className="h-10 w-10 rounded-full border-2 border-[#07070A] object-cover" />
+                  ))}
+                </span>
+              </button>
+            )}
+            <button onClick={() => fileRef.current?.click()} className="flex w-full items-center gap-4 py-4 text-left active:opacity-60">
+              <span className="text-3xl">📸</span>
+              <span className="flex-1 leading-tight">
+                <span className="block text-xl font-extrabold">{befores.length ? "New before photos" : "Add before photos"}</span>
+                <span className="text-sm text-white/55">Took it apart? Ray puts it back the way it was</span>
+              </span>
+            </button>
             {MISSIONS.map((m) => (
               <button
                 key={m.title}
@@ -1370,7 +1473,7 @@ export default function CallPage() {
               {listening ? "👂" : "🎙️"}
             </button>
             )}
-            <button onClick={markDone} className="col-span-2 grid h-20 place-items-center rounded-3xl bg-[#22C55E] text-3xl shadow-[0_8px_24px_rgba(34,197,94,.45)] active:scale-95" aria-label="Done with this step">
+            <button onClick={markDone} className={`${handsFree ? "col-span-2" : ""} grid h-20 place-items-center rounded-3xl bg-[#22C55E] text-3xl shadow-[0_8px_24px_rgba(34,197,94,.45)] active:scale-95`} aria-label="Done with this step">
               ✓
             </button>
           </div>

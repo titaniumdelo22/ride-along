@@ -26,6 +26,10 @@ export const Step = z.object({
   why: z.string().describe("Why, in under 12 simple words"),
   safety: z.string().nullable().describe("A safety warning in under 12 words, or null"),
   skill: z.string().describe("The trade skill this step trains, 2 to 3 words"),
+  photo: z
+    .number()
+    .nullable()
+    .describe("Only when putting something back together from before photos: the 0-based index of the photo that shows how this part should look. Else null."),
 });
 export type Step = z.infer<typeof Step>;
 
@@ -120,6 +124,7 @@ export type WatchInput = {
   teach: boolean;
   recent: string[]; // what the coach said lately, newest last
   surprises?: string[]; // curveballs already handled on this job
+  ref?: string | null; // a before photo of how this step should end up (putting it back together)
   userSaid: string | null;
 };
 
@@ -146,16 +151,24 @@ function imageBlock(frame: string) {
   return { type: "image" as const, source: { type: "base64" as const, media_type: "image/jpeg" as const, data: frame } };
 }
 
-export async function plan(task: string, frame: string | null, level: Level = "newbie"): Promise<Plan> {
+export async function plan(task: string, frame: string | null, level: Level = "newbie", befores: string[] = []): Promise<Plan> {
   if (!haveCredentials()) return MOCK_PLAN;
   const content: Anthropic.ContentBlockParam[] = [];
-  if (frame) content.push(imageBlock(frame));
+  befores.forEach((b, i) => {
+    content.push({ type: "text", text: `Before photo ${i}:` });
+    content.push(imageBlock(b));
+  });
+  if (frame) {
+    if (befores.length) content.push({ type: "text", text: "The live camera right now:" });
+    content.push(imageBlock(frame));
+  }
   content.push({
     type: "text",
     text: `The learner says they are working on: "${task || "the item in the camera"}".
 ${frame ? "The camera frame above may show the item and its label; read the model and serial number if you can." : ""}
 ${LEVEL_PLAN[level]}
 Write the step-by-step plan a journeyman would walk them through, hands-on, in order, with what you'll check on camera for each step, and every tool they need before they start.
+${befores.length ? `PUTTING IT BACK TOGETHER: the ${befores.length} before photos were taken while it came apart, in order (photo 0 first, before anything was removed). Write the steps to put it back together in reverse, one part at a time, and set each step's photo to the index of the before photo that shows how that part should look. Cover every tube on the right fitting, every screw back in, then a leak check and a power-on test.` : ""}
 They may already be partway through ("I'm stuck at...", or the camera shows it half done). Then don't start over: write the whole job, set startAt to the step they're on or stuck at, and in the intro say where you're picking up. If a safety step before it (power off, water off) isn't clearly done, make the step at startAt ONE quick check that it is, right before the step they're stuck on.`,
   });
   const res = await anthropic().messages.parse({
@@ -196,9 +209,13 @@ export async function watch(input: WatchInput): Promise<Watch> {
   const step = input.plan.steps[input.current];
   const content: Anthropic.ContentBlockParam[] = [];
   if (input.frame) content.push(imageBlock(input.frame));
+  if (input.ref) {
+    content.push({ type: "text", text: "Before photo: how this looked BEFORE it came apart." });
+    content.push(imageBlock(input.ref));
+  }
   content.push({
     type: "text",
-    text: `Job: ${input.plan.product.name}${input.plan.product.model ? ` (model ${input.plan.product.model})` : ""}.
+    text: `${input.ref ? "PUTTING IT BACK TOGETHER: compare the live camera (first image) with the before photo. Say what still doesn't match (a tube on the wrong fitting, a missing screw, a part flipped) and point at it on the live image. Only call the step done when it matches.\n" : ""}Job: ${input.plan.product.name}${input.plan.product.model ? ` (model ${input.plan.product.model})` : ""}.
 Current step ${input.current + 1} of ${input.plan.steps.length}: "${step.title}". Instruction: ${step.instruction}
 Done when the camera shows: ${step.check}
 ${step.safety ? `Safety for this step: ${step.safety}` : ""}
@@ -270,12 +287,12 @@ export const MOCK_PLAN: Plan = {
   startAt: 0,
   intro: "Hey, I've got you. I can read the label: Clover D1, 120 volts, R134a refrigerant. When one of these stops getting cold, the first suspect is airflow. Let's check it the safe way.",
   steps: [
-    { icon: "🔌", title: "Unplug the cooler", instruction: "Pull the plug out of the wall before you touch anything behind it.", check: "The plug is out of the outlet", why: "There's 120 volts to the compressor and a hot tank heater in there.", safety: "Never reach into the back of a plugged-in unit. The hot tank can also burn you.", skill: "Lockout and safety" },
-    { icon: "🏷️", title: "Read the data plate", instruction: "Show me the label on the back: model, volts, amps, refrigerant.", check: "The model and serial label is readable in the camera", why: "The plate tells you the refrigerant, the amps it should draw and the pressures it's built for, before you diagnose anything.", safety: null, skill: "Reading a data plate" },
-    { icon: "🔦", title: "Look at the condenser coils", instruction: "Shine a light on the black coils on the back. See all that gray fuzz? That's dust blocking the heat from getting out.", check: "The condenser coils are in view", why: "A fridge cools by dumping heat through these coils. Dust is a blanket on them, so the water never gets cold.", safety: null, skill: "Spotting airflow problems" },
-    { icon: "🧽", title: "Clean the coils", instruction: "Brush the coils gently, top to bottom, following the tubes. Don't bend the wires.", check: "The coils look clean, with no gray dust", why: "Going with the tubes lifts the dust off instead of packing it into the fins.", safety: "Coils can have sharp edges. Go slow.", skill: "Condenser cleaning" },
-    { icon: "📋", title: "Find it on the wiring diagram", instruction: "Now show me the wiring sticker. Point at the cold water thermostat.", check: "The wiring diagram sticker is in view", why: "The thermostat is the switch that tells the compressor to run. Knowing where it sits on the diagram is how you trace a no-cool problem.", safety: null, skill: "Reading a wiring diagram" },
-    { icon: "⚡", title: "Power on and listen", instruction: "Push it back, leave a few inches of space behind it, and plug it in. Listen for the compressor to start.", check: "The cooler is plugged in and the cold lamp is on", why: "A few inches of space lets the clean coils breathe. The hum is the compressor starting.", safety: null, skill: "Startup and verification" },
+    { icon: "🔌", title: "Unplug the cooler", instruction: "Pull the plug out of the wall before you touch anything behind it.", check: "The plug is out of the outlet", why: "There's 120 volts to the compressor and a hot tank heater in there.", safety: "Never reach into the back of a plugged-in unit. The hot tank can also burn you.", skill: "Lockout and safety", photo: null },
+    { icon: "🏷️", title: "Read the data plate", instruction: "Show me the label on the back: model, volts, amps, refrigerant.", check: "The model and serial label is readable in the camera", why: "The plate tells you the refrigerant, the amps it should draw and the pressures it's built for, before you diagnose anything.", safety: null, skill: "Reading a data plate", photo: null },
+    { icon: "🔦", title: "Look at the condenser coils", instruction: "Shine a light on the black coils on the back. See all that gray fuzz? That's dust blocking the heat from getting out.", check: "The condenser coils are in view", why: "A fridge cools by dumping heat through these coils. Dust is a blanket on them, so the water never gets cold.", safety: null, skill: "Spotting airflow problems", photo: null },
+    { icon: "🧽", title: "Clean the coils", instruction: "Brush the coils gently, top to bottom, following the tubes. Don't bend the wires.", check: "The coils look clean, with no gray dust", why: "Going with the tubes lifts the dust off instead of packing it into the fins.", safety: "Coils can have sharp edges. Go slow.", skill: "Condenser cleaning", photo: null },
+    { icon: "📋", title: "Find it on the wiring diagram", instruction: "Now show me the wiring sticker. Point at the cold water thermostat.", check: "The wiring diagram sticker is in view", why: "The thermostat is the switch that tells the compressor to run. Knowing where it sits on the diagram is how you trace a no-cool problem.", safety: null, skill: "Reading a wiring diagram", photo: null },
+    { icon: "⚡", title: "Power on and listen", instruction: "Push it back, leave a few inches of space behind it, and plug it in. Listen for the compressor to start.", check: "The cooler is plugged in and the cold lamp is on", why: "A few inches of space lets the clean coils breathe. The hum is the compressor starting.", safety: null, skill: "Startup and verification", photo: null },
   ],
 };
 
@@ -301,8 +318,8 @@ function mockWatch(input: WatchInput): Watch {
       surprise: {
         what: "Water pooling under the cooler",
         steps: [
-          { icon: "💧", title: "Check the drip tray", instruction: "Pull out the tray under the taps and empty it.", check: "The drip tray is out and empty", why: "A full tray often looks like a leak.", safety: null, skill: "Finding a leak" },
-          { icon: "🧻", title: "Dry it and watch", instruction: "Dry the floor, then watch it for a minute.", check: "The floor under the cooler is dry", why: "If it comes back, the leak is inside.", safety: "Keep water away from the plug.", skill: "Leak tracing" },
+          { icon: "💧", title: "Check the drip tray", instruction: "Pull out the tray under the taps and empty it.", check: "The drip tray is out and empty", why: "A full tray often looks like a leak.", safety: null, skill: "Finding a leak", photo: null },
+          { icon: "🧻", title: "Dry it and watch", instruction: "Dry the floor, then watch it for a minute.", check: "The floor under the cooler is dry", why: "If it comes back, the leak is inside.", safety: "Keep water away from the plug.", skill: "Leak tracing", photo: null },
         ],
       },
     };

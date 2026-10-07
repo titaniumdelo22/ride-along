@@ -14,6 +14,7 @@ export async function POST(req: Request) {
       teach: !!body.teach,
       recent: Array.isArray(body.recent) ? body.recent.slice(-4).map(String) : [],
       userSaid: body.userSaid ? String(body.userSaid).slice(0, 400) : null,
+      ref: typeof body.ref === "string" && body.ref.length < 600_000 ? body.ref : null,
       surprises: Array.isArray(body.surprises) ? body.surprises.slice(-6).map((x) => String(x).slice(0, 120)) : [],
     });
     return Response.json(w);
