@@ -58,3 +58,11 @@ body {
   50% { top: 88%; }
   100% { top: 8%; }
 }
+@keyframes blink {
+  0%, 93%, 100% { transform: scaleY(1); }
+  96% { transform: scaleY(0.1); }
+}
+@keyframes talk {
+  from { transform: scaleY(0.25); }
+  to { transform: scaleY(1.25); }
+}

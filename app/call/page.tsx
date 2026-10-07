@@ -4,6 +4,7 @@ import confetti from "canvas-confetti";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Kit, Plan, Report, Watch } from "@/lib/guide";
 import type { Identify } from "@/lib/identify";
+import RayFace from "./RayFace";
 
 type Phase = "setup" | "identify" | "planning" | "loadout" | "guiding" | "done";
 type Level = "newbie" | "intermediate" | "advanced";
@@ -21,7 +22,7 @@ type Recognition = {
   lang: string;
   interimResults: boolean;
   continuous: boolean;
-  onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal?: boolean }> }) => void) | null;
+  onresult: ((e: { resultIndex?: number; results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal?: boolean }> }) => void) | null;
   onend: (() => void) | null;
   onerror: ((e: { error?: string }) => void) | null;
   start: () => void;
@@ -51,6 +52,8 @@ function said(raw: string, phrases: string[]): boolean {
 
 // Live, like FaceTime: a fresh look every 1.5 s, up to 2 in flight at once (each takes a few seconds round trip).
 const WATCH_EVERY_MS = 1500;
+// What Ray says the instant he hears a question, so there's no dead air while he looks.
+const FILLERS = ["Okay, let me look.", "Got it. One sec.", "Mm, let me see.", "Okay, show me.", "Alright, let me look at that."];
 const MAX_LOOKS = 2;
 const ORANGE = "#FF6B1A";
 
@@ -74,6 +77,7 @@ function levelOf(xp: number) {
 
 const MISSIONS = [
   { icon: "💧", title: "Out-of-order water cooler", task: "This water cooler has an out of order sign. I know nothing about it. Help me fix it.", xp: 400, stars: 2 },
+  { icon: "📺", title: "Mount a TV", task: "I want to mount my TV on the wall. Teach me to do it right.", xp: 300, stars: 2 },
   { icon: "🚰", title: "Fix a dripping faucet", task: "My kitchen faucet drips. Teach me to fix it.", xp: 350, stars: 2 },
   { icon: "⚡", title: "Dead outlet: reset the GFCI", task: "An outlet stopped working. Teach me to check and reset the GFCI safely.", xp: 200, stars: 1 },
   { icon: "🌬️", title: "Swap an AC filter", task: "Teach me to change the air filter on my furnace or AC.", xp: 150, stars: 1 },
@@ -164,6 +168,7 @@ export default function CallPage() {
   const movingRef = useRef(false); // the camera is moving: wait until they hold still, then look
   const lastSayAt = useRef(0);
   const recentRef = useRef<string[]>([]);
+  const talkRef = useRef<{ who: "ray" | "you"; text: string }[]>([]); // the conversation, both sides
   const questionsRef = useRef<string[]>([]);
   const redoneRef = useRef<string[]>([]);
   const surprisesRef = useRef<string[]>([]);
@@ -172,6 +177,11 @@ export default function CallPage() {
   const clearedRef = useRef<Set<number>>(new Set());
   const jobRef = useRef(0);
   const handsFreeRef = useRef(true);
+  const armedRef = useRef(false); // the first tap happened (browsers only open the mic after one)
+  const screenEarRef = useRef(false); // this screen listens
+  const blockedRef = useRef(false);
+  const keepOpenRef = useRef(false); // phones that won't reopen the mic: keep it open the whole call, ignore Ray's own voice
+  const quickEnds = useRef(0);
   const earWantedRef = useRef(false);
   const earRef = useRef<Recognition | null>(null);
   const talkingRef = useRef(false);
@@ -207,6 +217,7 @@ export default function CallPage() {
   // Hands-free, like a phone call: the mic opens whenever Ray stops talking.
   const [handsFree, setHandsFree] = useState(true);
   const [earOn, setEarOn] = useState(false);
+  const [needTap, setNeedTap] = useState(false); // the phone refused to reopen the mic by itself: one tap anywhere fixes it
   const [heard, setHeard] = useState<string | null>(null);
   const [curveball, setCurveball] = useState<string | null>(null);
   const [sees, setSees] = useState<string | null>(null);
@@ -306,34 +317,49 @@ export default function CallPage() {
   }, []);
 
   const startEar = useCallback(function start() {
-    if (!handsFreeRef.current || !earWantedRef.current || earRef.current || talkingRef.current) return;
+    if (!handsFreeRef.current || !earWantedRef.current || earRef.current || blockedRef.current) return;
+    if (talkingRef.current && !keepOpenRef.current) return;
     const W = window as unknown as { SpeechRecognition?: new () => Recognition; webkitSpeechRecognition?: new () => Recognition };
     const Ctor = W.SpeechRecognition ?? W.webkitSpeechRecognition;
     if (!Ctor) return;
     const r = new Ctor();
     r.lang = "en-US";
     r.interimResults = true;
-    r.continuous = false;
+    r.continuous = keepOpenRef.current;
     const opened = Date.now();
+    const echo = () => talkingRef.current || Date.now() - lastSayAt.current < 700; // Ray hearing himself
     r.onresult = (e) => {
-      const results = Array.from(e.results);
-      voiceAt.current = Date.now();
-      if (!results.length || !results[results.length - 1].isFinal) return; // still talking
-      const text = results.map((x) => x[0].transcript).join(" ").trim();
-      if (text && !talkingRef.current) onHeardRef.current(text);
+      if (!echo()) voiceAt.current = Date.now();
+      const list = Array.from(e.results);
+      for (let i = e.resultIndex ?? 0; i < list.length; i++) {
+        if (!list[i].isFinal) continue; // still talking
+        const alt = list[i][0] as { transcript: string; confidence?: number };
+        const text = alt.transcript.trim();
+        if (alt.confidence && alt.confidence < 0.4) continue; // mumble from across the room
+        if (text && !echo()) onHeardRef.current(text);
+      }
+    };
+    const blocked = () => {
+      // This phone won't reopen the mic on its own: from the next tap, keep it open for the whole call.
+      blockedRef.current = true;
+      keepOpenRef.current = true;
+      setNeedTap(true);
     };
     r.onerror = (e) => {
-      if (e?.error === "not-allowed" || e?.error === "service-not-allowed") {
-        handsFreeRef.current = false;
-        setHandsFree(false);
-      }
+      if (e?.error === "not-allowed" || e?.error === "service-not-allowed") blocked();
     };
     r.onend = () => {
       if (earRef.current !== r) return;
       earRef.current = null;
       setEarOn(false);
-      // Reopen right away; back off if the browser keeps closing it instantly.
-      setTimeout(start, Date.now() - opened < 1000 ? 1500 : 250);
+      if (blockedRef.current) return;
+      // Closing instantly again and again means it's being refused quietly.
+      quickEnds.current = Date.now() - opened < 1000 ? quickEnds.current + 1 : 0;
+      if (quickEnds.current >= 3) {
+        quickEnds.current = 0;
+        return blocked();
+      }
+      setTimeout(start, quickEnds.current ? 1500 : 250);
     };
     earRef.current = r;
     setEarOn(true);
@@ -342,17 +368,21 @@ export default function CallPage() {
     } catch {
       earRef.current = null;
       setEarOn(false);
+      blocked();
     }
   }, []);
 
   // ── Voice out ─────────────────────────────────────────────────────────────
-  const speak = useCallback((text: string) => {
+  const speak = useCallback((text: string, opts?: { filler?: boolean }) => {
     setCaption(text);
     setHeard(null);
-    recentRef.current = [...recentRef.current, text].slice(-4);
+    if (!opts?.filler) {
+      recentRef.current = [...recentRef.current, text].slice(-4);
+      talkRef.current = [...talkRef.current, { who: "ray" as const, text }].slice(-12);
+    }
     if (typeof window === "undefined" || !window.speechSynthesis) return;
     talkingRef.current = true;
-    stopEar();
+    if (!keepOpenRef.current) stopEar();
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     uttRef.current = u;
@@ -549,6 +579,7 @@ export default function CallPage() {
       clearedRef.current = new Set();
       stepMistake.current = false;
       recentRef.current = [];
+      talkRef.current = [];
       questionsRef.current = [];
       redoneRef.current = [];
       surprisesRef.current = [];
@@ -669,7 +700,7 @@ export default function CallPage() {
         const res = await fetch("/api/watch", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ frame: capture(512, 0.5), task, level, plan, current: at, teach, recent: recentRef.current, userSaid, surprises: surprisesRef.current, ref: refPhoto(at) }),
+          body: JSON.stringify({ frame: capture(512, 0.5), task, level, plan, current: at, teach, recent: recentRef.current, talk: talkRef.current, userSaid, surprises: surprisesRef.current, ref: refPhoto(at) }),
         });
         const w = (await res.json()) as Watch & { error?: string };
         if (w.error) return;
@@ -909,6 +940,8 @@ export default function CallPage() {
           lookAt(text);
         } else {
           questionsRef.current = [...questionsRef.current, text].slice(-12);
+          talkRef.current = [...talkRef.current, { who: "you" as const, text }].slice(-12);
+          speak(FILLERS[Math.floor(Math.random() * FILLERS.length)], { filler: true });
           tick(text);
           unlock("asked");
         }
@@ -935,10 +968,24 @@ export default function CallPage() {
   // Hands-free is on for every screen after the first tap (the tap is what lets the browser open the mic).
   useEffect(() => {
     handsFreeRef.current = handsFree;
-    earWantedRef.current = handsFree && (phase === "identify" || phase === "loadout" || phase === "guiding" || phase === "done");
+    screenEarRef.current = phase !== "planning";
+    earWantedRef.current = handsFree && armedRef.current && screenEarRef.current;
     if (earWantedRef.current) startEar();
     else stopEar();
   }, [phase, handsFree, startEar, stopEar]);
+  useEffect(() => {
+    const onTap = () => {
+      armedRef.current = true;
+      if (blockedRef.current) {
+        blockedRef.current = false;
+        setNeedTap(false);
+      }
+      earWantedRef.current = handsFreeRef.current && screenEarRef.current;
+      startEar(); // inside the tap, which is what phones need to open the mic
+    };
+    document.addEventListener("pointerdown", onTap, true);
+    return () => document.removeEventListener("pointerdown", onTap, true);
+  }, [startEar]);
   useEffect(() => () => stopEar(), [stopEar]);
   useEffect(() => {
     if (!curveball) return;
@@ -962,7 +1009,10 @@ export default function CallPage() {
           const last = recentRef.current[recentRef.current.length - 1];
           return last ? speak(last) : undefined;
         }
+        if (text.trim().split(/\s+/).length < 2) return; // a stray word from the room, not a question
         questionsRef.current = [...questionsRef.current, text].slice(-12);
+        talkRef.current = [...talkRef.current, { who: "you" as const, text }].slice(-12);
+        speak(FILLERS[Math.floor(Math.random() * FILLERS.length)], { filler: true });
         unlock("asked");
         tick(text);
         return;
@@ -971,12 +1021,37 @@ export default function CallPage() {
         if (said(text, SAY.fix)) return fixIt();
         if (said(text, SAY.look)) return void lookAt();
         if (said(text, SAY.repeat)) return speak(found.say);
+        if (text.trim().split(/\s+/).length < 3) return; // chatter, not a description
         setTask(text);
         lookAt(text);
         return;
       }
       if (phase === "loadout") {
         if (said(text, SAY.go)) return plan ? go() : speak("Almost. I'm still mapping it out.");
+        return;
+      }
+      if (phase === "setup") {
+        const t = text.toLowerCase();
+        if (page === "level") {
+          const pick: Level | null = /never|new|first|no\b/.test(t) ? "newbie" : /few|some|little|couple|once|twice/.test(t) ? "intermediate" : /pro|lot|expert|advanced|all the time/.test(t) ? "advanced" : null;
+          if (!pick) return;
+          setLevel(pick);
+          try {
+            localStorage.setItem("ra.level", pick);
+          } catch {}
+          cue("coin");
+          return setPage("point");
+        }
+        if (page === "point" && /what (is|am i|are)|look|identify|scan|no idea|don't know|dont know/.test(t)) return void lookAt();
+        if (page === "point" && /i know|pick|list|jobs?$/.test(t)) return setPage("job");
+        if (/^(back|go back)$/.test(t.trim())) return setPage(page === "job" ? "point" : "level");
+        // On the job page (or when they clearly describe a problem), that's the job, in their words.
+        // Short chatter from the room is ignored.
+        const words = t.split(/\s+/).length;
+        if ((page === "job" && words >= 3) || (page === "point" && words >= 4 && /fix|broke|stuck|leak|won't|wont|not working|isn't|help|trying/.test(t))) {
+          setTask(text);
+          begin(text);
+        }
         return;
       }
       if (phase === "done" && report && /report|read|summary|what did i do/i.test(text)) {
@@ -1038,7 +1113,7 @@ export default function CallPage() {
 
       {/* Top: Ray (like a FaceTime bubble) and the XP bar */}
       <div className="absolute inset-x-4 top-4 flex items-center gap-3">
-        <div className={`relative grid h-14 w-14 flex-none place-items-center rounded-full bg-gradient-to-br from-[#FF8A3D] to-[#E4540B] text-3xl shadow-[0_0_24px_rgba(255,107,26,.6)] ${speaking ? "ring-4 ring-[#FF6B1A]/60 animate-pulse" : ""}`}>
+        <div className={`relative grid h-14 w-14 flex-none place-items-center rounded-full bg-gradient-to-br from-[#FF8A3D] to-[#E4540B] text-3xl shadow-[0_0_24px_rgba(255,107,26,.6)] ${speaking ? "ring-4 ring-[#FF6B1A]/60 animate-pulse" : ""} ${phase === "guiding" ? "hidden" : ""}`}>
           <span key={mood} className="animate-[pop_.35s_ease-out]">{mood}</span>
         </div>
         <div className="min-w-0 flex-1">
@@ -1046,13 +1121,15 @@ export default function CallPage() {
             <span className="font-bold">Ray <span className="font-normal text-white/60">· journeyman{kit && !live ? " · practice" : ""}</span></span>
             <span className="flex items-center gap-2">
               {phase === "guiding" && <span className="tabular-nums text-white/70">{mm}:{ss}</span>}
-              {phase !== "setup" && phase !== "planning" && (
+              {phase !== "planning" && (armedRef.current || phase !== "setup") && (
                 <button
-                  onClick={() => setHandsFree((h) => !h)}
+                  onClick={() => (needTap ? undefined : setHandsFree((h) => !h))}
                   className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-extrabold ${!handsFree ? "bg-white/10 text-white/50" : earOn && !speaking ? "bg-[#22C55E] text-black" : "bg-white/15"}`}
                   aria-label="Hands-free on or off"
                 >
-                  {!handsFree ? "🎧 Off" : earOn && !speaking ? (
+                  {!handsFree ? "🎧 Off" : needTap ? (
+                    <span className="animate-pulse">👆 Tap anywhere to listen</span>
+                  ) : earOn && !speaking ? (
                     <>
                       <span className="h-2 w-2 animate-pulse rounded-full bg-black" /> Listening
                     </>
@@ -1077,14 +1154,31 @@ export default function CallPage() {
 
       {/* Combo */}
       {phase === "guiding" && combo >= 2 && (
-        <div key={combo} className="absolute right-4 top-24 animate-[pop_.4s_ease-out] rounded-full bg-gradient-to-r from-[#FF3D6E] to-[#FF6B1A] px-4 py-1.5 text-lg font-black shadow-xl">
+        <div key={combo} className="absolute left-4 top-[8.25rem] animate-[pop_.4s_ease-out] rounded-full bg-gradient-to-r from-[#FF3D6E] to-[#FF6B1A] px-4 py-1.5 text-lg font-black shadow-xl">
           🔥 x{combo}
+        </div>
+      )}
+
+      {/* Ray on the call, FaceTime style */}
+      {phase === "guiding" && (
+        <div className={`absolute right-4 top-24 h-40 w-28 overflow-hidden rounded-2xl border-2 shadow-2xl transition-colors ${speaking ? "border-[#22C55E]" : "border-white/25"}`}>
+          <RayFace talking={speaking} mood={safety ? "worried" : flash === "good" || flash === null && combo >= 2 ? "happy" : flash === "bad" ? "worried" : "ok"} look={point ? (point.x - 0.5) * 2 : 0} />
+          <div className="absolute inset-x-0 bottom-0 flex items-end justify-between bg-gradient-to-t from-black/75 to-transparent px-2 pb-1.5 pt-5 text-[11px] font-bold">
+            <span>Ray</span>
+            {speaking && (
+              <span className="flex h-3 items-end gap-[2px]">
+                {[0, 1, 2, 3].map((i) => (
+                  <span key={i} className="w-[3px] animate-[talk_.3s_ease-in-out_infinite_alternate] rounded-full bg-[#22C55E]" style={{ height: `${6 + (i % 2) * 5}px`, animationDelay: `${i * 0.07}s` }} />
+                ))}
+              </span>
+            )}
+          </div>
         </div>
       )}
 
       {/* Live: what Ray sees right now */}
       {phase === "guiding" && (
-        <div className="absolute left-4 top-24 flex max-w-[68%] items-center gap-2 rounded-full bg-black/55 px-3 py-1.5 text-xs backdrop-blur">
+        <div className="absolute left-4 top-24 flex max-w-[calc(100%-10.5rem)] items-center gap-2 rounded-full bg-black/55 px-3 py-1.5 text-xs backdrop-blur">
           <span className="h-2 w-2 flex-none animate-pulse rounded-full bg-red-500" />
           <span className="font-black tracking-wider">LIVE</span>
           <span key={sees ?? ""} className="truncate text-white/85 animate-[rise_.3s_ease-out]">{sees ? `· ${sees}` : "· Ray is watching"}</span>
@@ -1163,8 +1257,8 @@ export default function CallPage() {
 
       {/* Safety */}
       {phase === "guiding" && refPhoto(current) && (
-        <button onClick={() => setZoom(refPhoto(current))} className="absolute right-4 top-36 w-28 overflow-hidden rounded-2xl border-2 border-white shadow-2xl">
-          <img src={`data:image/jpeg;base64,${refPhoto(current)}`} alt="How it looked before" className="h-32 w-full object-cover" />
+        <button onClick={() => setZoom(refPhoto(current))} className="absolute right-4 top-[16rem] w-28 overflow-hidden rounded-2xl border-2 border-white shadow-2xl">
+          <img src={`data:image/jpeg;base64,${refPhoto(current)}`} alt="How it looked before" className="h-24 w-full object-cover" />
           <span className="block bg-white py-1 text-center text-[11px] font-black uppercase tracking-wide text-black">How it looked</span>
         </button>
       )}
@@ -1176,7 +1270,7 @@ export default function CallPage() {
       )}
 
       {curveball && phase === "guiding" && !safety && (
-        <div key={curveball} className="absolute inset-x-4 top-36 flex animate-[rise_.4s_ease-out] items-center gap-3 rounded-3xl bg-[#F59E0B] px-4 py-3 text-black shadow-2xl">
+        <div key={curveball} className="absolute left-4 right-36 top-36 flex animate-[rise_.4s_ease-out] items-center gap-3 rounded-3xl bg-[#F59E0B] px-4 py-3 text-black shadow-2xl">
           <span className="text-4xl">🚧</span>
           <span>
             <span className="block text-xs font-black uppercase tracking-[0.2em]">Curveball</span>
@@ -1186,7 +1280,7 @@ export default function CallPage() {
       )}
 
       {safety && phase === "guiding" && (
-        <div className="absolute inset-x-4 top-36 flex items-center gap-3 rounded-3xl bg-red-600 px-4 py-3 text-xl font-extrabold shadow-2xl animate-pulse">
+        <div className="absolute left-4 right-36 top-36 flex items-center gap-3 rounded-3xl bg-red-600 px-4 py-3 text-lg font-extrabold leading-tight shadow-2xl animate-pulse">
           <span className="text-4xl">⚠️</span>
           {safety}
         </div>

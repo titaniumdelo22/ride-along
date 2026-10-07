@@ -58,7 +58,7 @@ export type Kit = z.infer<typeof Kit>;
 export const Watch = z.object({
   see: z.string().describe("One short sentence: what is in the camera right now"),
   stepDone: z.boolean().describe("True only if the camera clearly shows the current step's check is met"),
-  say: z.string().nullable().describe("What to say out loud now: ONE short sentence, under 15 simple words, or null to stay quiet"),
+  say: z.string().nullable().describe("What to say out loud now: ONE short sentence under 15 simple words (up to two when answering them), or null to stay quiet"),
   point: z
     .object({
       x: z.number().describe("0 to 1 from the left edge of the image"),
@@ -123,6 +123,7 @@ export type WatchInput = {
   current: number;
   teach: boolean;
   recent: string[]; // what the coach said lately, newest last
+  talk?: { who: "ray" | "you"; text: string }[]; // the conversation so far, newest last
   surprises?: string[]; // curveballs already handled on this job
   ref?: string | null; // a before photo of how this step should end up (putting it back together)
   userSaid: string | null;
@@ -136,6 +137,7 @@ const COACH = `You are a patient journeyman with 25 years in the trades, on a li
 - Point at the exact part you mean when it helps.
 - Safety beats speed, always.
 - This is a LIVE call: you get a fresh frame every second or two. Keep "see" under 8 words. When something changes, react like a person on FaceTime with 2 to 6 words ("Yep, that's it." "Little closer." "Good, keep going."), but don't narrate every frame.
+- It's a conversation: remember what they told you and what they already tried, and build on it.
 - Real jobs never go exactly to plan. Watch for curveballs: a leak, burn marks, a stuck screw, rust, a broken or missing part, a setup that doesn't match the plan. When one shows up, stay calm, say what you see, and add the steps to handle it. That is the most valuable thing you teach.`;
 
 export function haveCredentials(): boolean {
@@ -224,8 +226,8 @@ Steps after this: ${input.plan.steps.slice(input.current + 1).map((s) => s.title
 Curveballs already handled: ${input.surprises?.length ? input.surprises.join("; ") : "none"}.
 Learner level: ${LEVEL_WATCH[input.level ?? "newbie"]}
 ${input.teach ? "TEACH MODE: when a step finishes, before telling them the next one, ask what they think comes next and why. Praise right answers, correct wrong ones kindly." : ""}
-What you said lately: ${input.recent.length ? input.recent.map((s) => `"${s}"`).join(" ") : "(nothing yet)"}
-${input.userSaid ? `The learner just said: "${input.userSaid}". Answer them directly.` : "The learner hasn't said anything new."}
+${input.talk?.length ? `The conversation so far (newest last): ${input.talk.map((t) => `${t.who === "you" ? "Learner" : "You"}: "${t.text}"`).join(" | ")}` : `What you said lately: ${input.recent.length ? input.recent.map((s) => `"${s}"`).join(" ") : "(nothing yet)"}`}
+${input.userSaid ? `The learner just said: "${input.userSaid}". Answer them directly, like on a phone call. If they tried something and it still isn't working, do NOT repeat the same instruction: give the next likely cause and the next thing to try (or ask one quick question), and add steps for it with surprise if needed.` : "The learner hasn't said anything new."}
 Look at the camera frame and respond.`,
   });
   const res = await anthropic().messages.parse({
