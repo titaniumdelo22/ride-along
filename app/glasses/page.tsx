@@ -4,6 +4,8 @@ import Link from "next/link";
 import GlassesOverlay, { type OverlayPart } from "@/components/GlassesOverlay";
 import { PARTS, byLabel } from "@/lib/parts";
 import { MotionTracker } from "@/lib/motion";
+import ScanDrawer, { type Mode } from "@/components/ScanDrawer";
+import type { FixPlan } from "@/lib/fix";
 
 /**
  * Glasses view: live camera, every known part tinted in its color and labeled.
@@ -29,6 +31,18 @@ export default function GlassesPage() {
   const [tracking, setTracking] = useState(true);
   const trackingRef = useRef(tracking);
   trackingRef.current = tracking;
+  // drawer modes
+  const [mode, setMode] = useState<Mode>("parts");
+  const [tourIndex, setTourIndex] = useState(0);
+  const [plan, setPlan] = useState<FixPlan | null>(null);
+  const [stepIndex, setStepIndex] = useState(0);
+  const [planning, setPlanning] = useState(false);
+  const [lastSay, setLastSay] = useState<string | null>(null);
+  const [listening, setListening] = useState(false);
+  const modeRef = useRef(mode); modeRef.current = mode;
+  const planRef = useRef(plan); planRef.current = plan;
+  const stepRef = useRef(stepIndex); stepRef.current = stepIndex;
+  const userSaidRef = useRef<string | null>(null);
   const useMasksRef = useRef(useMasks);
   const pausedRef = useRef(paused);
   useMasksRef.current = useMasks;
@@ -260,6 +274,92 @@ export default function GlassesPage() {
     window.speechSynthesis.speak(u);
   };
 
+  // Tour: say each stop as you reach it
+  useEffect(() => {
+    if (mode !== "tour") return;
+    const d = PARTS[tourIndex];
+    setSelected(d.label);
+    speak(`${d.label}. ${d.says}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, tourIndex]);
+
+  // Fix: say each step as you reach it
+  useEffect(() => {
+    if (mode !== "fix" || !plan) return;
+    const st = plan.steps[stepIndex];
+    if (!st) return;
+    setLastSay(null);
+    speak(stepIndex === 0 ? `${plan.intro} ${plan.diagnosis} First: ${st.instruction}` : `${st.title}. ${st.instruction}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, plan, stepIndex]);
+
+  // Fix: watch the camera every ~3 s and move on when the step is clearly done
+  useEffect(() => {
+    let stop = false;
+    const loop = async () => {
+      while (!stop) {
+        await new Promise((r) => setTimeout(r, 3000));
+        const pl = planRef.current;
+        if (modeRef.current !== "fix" || !pl || pausedRef.current) continue;
+        if (typeof window !== "undefined" && window.speechSynthesis?.speaking && !userSaidRef.current) continue;
+        const frame = grab(640, 0.6);
+        if (!frame) continue;
+        const idx = stepRef.current;
+        const said = userSaidRef.current; userSaidRef.current = null;
+        try {
+          const res = await fetch("/api/fix", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: "watch", frame, step: pl.steps[idx], userSaid: said }) });
+          const w = (await res.json()) as { stepDone?: boolean; say?: string | null; safety?: string | null; error?: string };
+          if (w.error) continue;
+          if (w.safety) { setLastSay(w.safety); speak(w.safety); continue; }
+          if (w.say) { setLastSay(w.say); speak(w.say); }
+          if (w.stepDone && stepRef.current === idx && idx < pl.steps.length - 1) {
+            setStepIndex(idx + 1);
+          }
+        } catch { /* try again next tick */ }
+      }
+    };
+    loop();
+    return () => { stop = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [grab]);
+
+  const onPlan = async (problem: string) => {
+    if (!problem) { setPlan(null); setStepIndex(0); setSelected(null); return; }
+    setPlanning(true);
+    setErr(null);
+    try {
+      const frame = grab(640, 0.6);
+      const res = await fetch("/api/fix", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: "plan", problem, frame }) });
+      const j = (await res.json()) as FixPlan & { error?: string };
+      if (j.error) throw new Error(j.error);
+      setPlan(j);
+      setStepIndex(0);
+    } catch (e) {
+      setErr("Ray couldn't make a plan: " + String((e as Error).message || e));
+    } finally {
+      setPlanning(false);
+    }
+  };
+
+  type Recognition = { lang: string; interimResults: boolean; onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null; onend: (() => void) | null; onerror: (() => void) | null; start: () => void; stop: () => void };
+  const onMic = () => {
+    const W = window as unknown as { SpeechRecognition?: new () => Recognition; webkitSpeechRecognition?: new () => Recognition };
+    const Ctor = W.SpeechRecognition ?? W.webkitSpeechRecognition;
+    if (!Ctor) { setErr("Voice input isn't available in this browser. Type instead."); return; }
+    window.speechSynthesis?.cancel();
+    const r = new Ctor();
+    r.lang = "en-US"; r.interimResults = false;
+    setListening(true);
+    r.onresult = (e) => {
+      const text = e.results[0][0].transcript;
+      if (planRef.current) userSaidRef.current = text; // a question mid-job
+      else onPlan(text); // describing the problem
+    };
+    r.onend = () => setListening(false);
+    r.onerror = () => setListening(false);
+    r.start();
+  };
+
   const onTap = (label: string | null) => {
     setSelected(label);
     if (!label) return;
@@ -267,11 +367,16 @@ export default function GlassesPage() {
     if (def) speak(def.says);
   };
 
+  // What gets drawn: in Fix mode only the current step's parts; with a selection only that part; otherwise everything.
+  const stepParts = mode === "fix" && plan ? new Set(plan.steps[stepIndex]?.parts ?? []) : null;
+  const visibleParts = stepParts && stepParts.size > 0 ? parts.filter((p) => stepParts.has(p.label)) : selected ? parts.filter((p) => p.label === selected) : parts;
+  const inView = new Set(parts.map((p) => p.label));
+
   return (
     <main className="h-dvh w-screen bg-black text-white overflow-hidden relative select-none">
       <div ref={wrapRef} className="absolute inset-0">
         <video ref={videoRef} playsInline muted className="h-full w-full object-cover" />
-        {view.w > 0 && <GlassesOverlay parts={parts} view={view} drift={drift} selected={selected} onTap={onTap} />}
+        {view.w > 0 && <GlassesOverlay parts={visibleParts} view={view} drift={drift} selected={selected} onTap={onTap} />}
       </div>
 
       {/* top bar */}
@@ -281,25 +386,18 @@ export default function GlassesPage() {
         <span className="ml-auto text-xs text-white/80">{status}</span>
       </div>
 
-      {/* legend */}
-      <div className="absolute right-3 top-14 flex flex-col gap-1.5 max-h-[60vh] overflow-auto">
-        {PARTS.filter((p) => seen.has(p.label)).map((p) => (
-          <button key={p.label} onClick={() => onTap(selected === p.label ? null : p.label)}
-            className={`flex items-center gap-2 rounded-full px-2.5 py-1 text-xs font-semibold backdrop-blur ${selected === p.label ? "bg-white text-black" : "bg-black/50"}`}>
-            <span className="h-3 w-3 rounded-full" style={{ background: p.color }} />
-            {p.label}
-          </button>
-        ))}
+      {/* small controls, top right under the status */}
+      <div className="absolute right-3 top-12 flex gap-1.5 text-[11px]">
+        <button onClick={() => setPaused((p) => !p)} className="rounded-full bg-black/50 px-2.5 py-1 font-semibold backdrop-blur">{paused ? "Resume" : "Freeze"}</button>
+        <button onClick={() => setTracking((t) => !t)} className={`rounded-full px-2.5 py-1 font-semibold backdrop-blur ${tracking ? "bg-black/50" : "bg-black/30 text-white/50"}`}>Track</button>
+        <Link href="/call" className="rounded-full bg-black/50 px-2.5 py-1 font-semibold backdrop-blur">Call Ray</Link>
       </div>
 
-      {/* bottom bar */}
-      <div className="absolute bottom-0 inset-x-0 p-3 pb-6 flex items-center gap-1.5 whitespace-nowrap bg-gradient-to-t from-black/80 to-transparent text-xs">
-        <button onClick={() => setPaused((p) => !p)} className="rounded-full bg-white/15 px-3 py-2 font-semibold backdrop-blur">{paused ? "Resume" : "Freeze"}</button>
-        <button onClick={() => setTracking((t) => !t)} className={`rounded-full px-3 py-2 font-semibold backdrop-blur ${tracking ? "bg-white/25" : "bg-white/15 text-white/60"}`}>Track</button>
-        <button onClick={() => setUseMasks((m) => !m)} className={`rounded-full px-3 py-2 font-semibold backdrop-blur ${useMasks ? "bg-[#FF6B1A] text-black" : "bg-white/15"}`}>Outlines</button>
-        <Link href="/call" className="rounded-full bg-white/15 px-3 py-2 font-semibold backdrop-blur">Call my pro →</Link>
-        <span className="ml-auto hidden sm:inline text-white/60 tabular-nums">boxes {ms.box ? `${(ms.box / 1000).toFixed(1)}s` : "–"} · outlines {ms.mask ? `${(ms.mask / 1000).toFixed(1)}s` : "–"}</span>
-      </div>
+      <ScanDrawer mode={mode} setMode={(m) => { setMode(m); if (m !== "tour" && m !== "fix") setSelected(null); if (m === "tour") setSelected(PARTS[tourIndex].label); }}
+        seen={seen} inView={inView} selected={selected} onSelect={onTap}
+        tourIndex={tourIndex} setTourIndex={setTourIndex}
+        plan={plan} stepIndex={stepIndex} setStepIndex={setStepIndex} planning={planning} onPlan={onPlan}
+        lastSay={lastSay} listening={listening} onMic={onMic} />
 
       {needTap && (
         <button onClick={async () => { if (!(await startCamera())) setErr("Camera blocked. In Safari: aA menu → Website Settings → Camera → Allow, then reload."); }}
@@ -307,7 +405,7 @@ export default function GlassesPage() {
           Tap to start the camera
         </button>
       )}
-      {err && <div className="absolute left-3 right-3 bottom-20 rounded-xl bg-red-600/90 p-3 text-sm">{err}</div>}
+      {err && <div className="absolute left-3 right-3 top-24 rounded-xl bg-red-600/90 p-3 text-sm">{err}</div>}
       {selected && (
         <div className="absolute left-3 right-24 bottom-20 rounded-xl bg-black/70 p-3 text-sm backdrop-blur">
           <b style={{ color: byLabel(selected)?.color }}>{selected}</b> · {byLabel(selected)?.says}
