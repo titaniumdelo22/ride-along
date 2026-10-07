@@ -50,6 +50,7 @@ export default function GlassesPage() {
   const [looking, setLooking] = useState(false);
   const replannedStep = useRef(-1); // step index we already re-planned from (one re-plan per step)
   const [fixPhase, setFixPhase] = useState<FixPhase>("idle");
+  const fixPhaseRef = useRef(fixPhase); fixPhaseRef.current = fixPhase;
   const [intake, setIntake] = useState<Intake | null>(null);
   const photosRef = useRef<string[]>([]);
   const notesRef = useRef<string[]>([]);
@@ -431,6 +432,22 @@ export default function GlassesPage() {
 
   const onPlan = async (problem: string) => { if (!problem) resetFix(); };
 
+  const [asking, setAsking] = useState(false);
+  const askRayNow = async (question: string) => {
+    setAsking(true); setLastSay(`You: ${question}`);
+    try {
+      const frame = grab(768, 0.7);
+      const res = await fetch("/api/fix", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({
+        mode: "ask", question, frame, tab: modeRef.current, problem: problemRef.current, plan: planRef.current, current: stepRef.current,
+        inView: partsRef.current.map((pp) => pp.label) }) });
+      const j = (await res.json()) as { say?: string; error?: string };
+      const ans = j.say ?? "I didn't catch that. Ask me again?";
+      setLastSay(ans); setAnswer(ans); speak(ans);
+    } catch { speak("I lost you for a second. Ask me again?"); }
+    finally { setAsking(false); }
+  };
+  const [answer, setAnswer] = useState<string | null>(null);
+
   type Recognition = { lang: string; interimResults: boolean; onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null; onend: (() => void) | null; onerror: (() => void) | null; start: () => void; stop: () => void };
   const onMic = () => {
     const W = window as unknown as { SpeechRecognition?: new () => Recognition; webkitSpeechRecognition?: new () => Recognition };
@@ -442,8 +459,8 @@ export default function GlassesPage() {
     setListening(true);
     r.onresult = (e) => {
       const text = e.results[0][0].transcript;
-      if (planRef.current) userSaidRef.current = text; // a question mid-job
-      else onProblem(text); // describing the problem
+      if (modeRef.current === "fix" && !planRef.current && fixPhaseRef.current === "problem") onProblem(text); // describing the problem
+      else askRayNow(text); // any question, any time
     };
     r.onend = () => setListening(false);
     r.onerror = () => setListening(false);
@@ -489,6 +506,19 @@ export default function GlassesPage() {
         <button onClick={() => setTracking((t) => !t)} className={`rounded-full px-2.5 py-1 font-semibold backdrop-blur ${tracking ? "bg-black/50" : "bg-black/30 text-white/50"}`}>Track</button>
         <Link href={`/call?task=${encodeURIComponent("I took this apart. Help me put it back together the right way, every screw and tube where it goes.")}&name=${encodeURIComponent("Put it back together")}`} className="rounded-full bg-hazard px-4 py-1.5 font-display text-sm uppercase tracking-wide text-ink">📞 Ask Ray</Link>
       </div>
+
+      {/* Talk to Ray: tap, ask anything, hear the answer */}
+      <button onClick={onMic} disabled={asking}
+        className={`absolute right-4 z-30 grid h-16 w-16 place-items-center rounded-full text-3xl shadow-2xl transition ${listening ? "bg-red-500 scale-110" : asking ? "bg-white/40" : "bg-[#FF6B1A]"}`}
+        style={{ top: 112 }} aria-label="Talk to Ray">
+        {listening ? "👂" : asking ? "…" : "🎙️"}
+      </button>
+      {(listening || asking || answer) && (
+        <div className="absolute left-3 right-24 z-30 rounded-2xl bg-black/75 p-3 text-sm backdrop-blur" style={{ top: 112 }}
+          onClick={() => setAnswer(null)}>
+          {listening ? "Listening… ask Ray anything." : asking ? "Ray is thinking…" : <><b className="text-[#FF6B1A]">Ray:</b> {answer}</>}
+        </div>
+      )}
 
       <ScanDrawer mode={mode} setMode={(m) => { setMode(m); if (m !== "tour" && m !== "fix") setSelected(null); if (m === "tour") setSelected(PARTS[tourIndex].label); }}
         seen={seen} inView={inView} selected={selected} onSelect={onTap}

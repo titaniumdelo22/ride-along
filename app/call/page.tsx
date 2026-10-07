@@ -1,6 +1,7 @@
 "use client";
 
 import confetti from "canvas-confetti";
+import { speak as sayAloud, isSpeaking, stopSpeaking } from "@/lib/voice";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Kit, Plan, Report, Watch } from "@/lib/guide";
 import type { Identify } from "@/lib/identify";
@@ -408,32 +409,25 @@ export default function CallPage() {
       recentRef.current = [...recentRef.current, text].slice(-4);
       talkRef.current = [...talkRef.current, { who: "ray" as const, text }].slice(-12);
     }
-    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    if (typeof window === "undefined") return;
     talkingRef.current = true;
     if (!keepOpenRef.current) stopEar();
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    uttRef.current = u;
+    // Ray speaks with the cloned Cartesia voice (falls back to the phone voice inside lib/voice).
+    const token = {};
+    uttRef.current = token as unknown as SpeechSynthesisUtterance;
     const finish = () => {
-      if (uttRef.current !== u) return;
+      if (uttRef.current !== (token as unknown as SpeechSynthesisUtterance)) return;
       uttRef.current = null;
       talkingRef.current = false;
       lastSayAt.current = Date.now();
       setSpeaking(false);
       setTimeout(startEar, 350);
     };
-    // Some phones never fire onend: don't leave the mic closed forever.
+    // Some phones never fire an end event: don't leave the mic closed forever.
     setTimeout(() => {
-      if (uttRef.current === u && !window.speechSynthesis.speaking) finish();
-    }, 2500 + text.length * 90);
-    u.rate = 1.03;
-    const voices = window.speechSynthesis.getVoices();
-    const v = voices.find((x) => /en-US/.test(x.lang) && /Daniel|Alex|Aaron|Fred|Google US English|Male/i.test(x.name)) ?? voices.find((x) => /en/.test(x.lang));
-    if (v) u.voice = v;
-    u.onstart = () => setSpeaking(true);
-    u.onend = finish;
-    u.onerror = finish;
-    window.speechSynthesis.speak(u);
+      if (uttRef.current === (token as unknown as SpeechSynthesisUtterance) && !isSpeaking()) finish();
+    }, 4000 + text.length * 90);
+    void sayAloud(text, { onStart: () => setSpeaking(true), onEnd: finish });
   }, [stopEar, startEar]);
 
   // ── The game's moments ────────────────────────────────────────────────────
@@ -848,7 +842,7 @@ export default function CallPage() {
           setPlan((p) => (p ? { ...p, steps: p.steps.filter((s, i) => i <= at || !gone.has(s.title)) } : p));
         }
         const theyreTalking = !userSaid && Date.now() - voiceAt.current < 2500;
-        const rayTalking = !!window.speechSynthesis?.speaking;
+        const rayTalking = isSpeaking();
         if (w.say && !theyreTalking && (userSaid || (!rayTalking && Date.now() - lastSayAt.current > 2000))) speak(w.say);
         else if (w.safety && !rayTalking) speak(w.safety);
         if (w.stepDone && sameStep && !detour) {
@@ -1041,7 +1035,7 @@ export default function CallPage() {
         setError("Voice isn't available in this browser. Type instead.");
         return;
       }
-      window.speechSynthesis?.cancel();
+      stopSpeaking();
       stopEar();
       const r = new Ctor();
       r.lang = "en-US";
@@ -1733,7 +1727,7 @@ export default function CallPage() {
             </button>
             <button
               onClick={() => {
-                window.speechSynthesis?.cancel();
+                stopSpeaking();
                 setPhase("setup");
                 setFound(null);
                 setSnap(null);

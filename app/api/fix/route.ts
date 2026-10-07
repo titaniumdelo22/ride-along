@@ -1,4 +1,4 @@
-import { planFix, watchFix, replanFix, intakeNext, type WatchContext, type Anomaly } from "@/lib/fix";
+import { planFix, watchFix, replanFix, intakeNext, askRay, type WatchContext, type Anomaly } from "@/lib/fix";
 
 /**
  * POST /api/fix
@@ -7,7 +7,8 @@ import { planFix, watchFix, replanFix, intakeNext, type WatchContext, type Anoma
  */
 export async function POST(req: Request) {
   try {
-    const b = (await req.json()) as { mode: string; problem?: string; frame?: string | null; photos?: string[]; notes?: string[]; asked?: string[]; done?: string[]; anomalies?: Anomaly[] } & Partial<WatchContext>;
+    const b = (await req.json()) as { mode: string; problem?: string; frame?: string | null; photos?: string[]; notes?: string[]; asked?: string[]; done?: string[]; question?: string; tab?: string; inView?: string[]; anomalies?: Anomaly[] } & Partial<WatchContext>;
+    if (b.mode === "ask") return Response.json({ say: await askRay(String(b.question ?? "").slice(0, 400), b.frame ?? null, { tab: String(b.tab ?? "scan"), problem: b.problem, plan: b.plan ?? null, current: Number(b.current) || 0, inView: Array.isArray(b.inView) ? b.inView.map(String) : [] }) });
     if (b.mode === "intake") return Response.json(await intakeNext(String(b.problem ?? "").slice(0, 400), Array.isArray(b.photos) ? b.photos.slice(0, 5) : [], 4, Array.isArray(b.asked) ? b.asked.map(String) : []));
     if (b.mode === "plan") return Response.json(await planFix(String(b.problem ?? "").slice(0, 400), b.frame ?? null, Array.isArray(b.photos) ? b.photos.slice(0, 5) : [], Array.isArray(b.notes) ? b.notes.map(String) : []));
     if (b.mode === "watch" && b.frame && b.plan) {

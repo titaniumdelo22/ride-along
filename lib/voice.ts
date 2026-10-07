@@ -50,9 +50,14 @@ export function stopSpeaking() {
   speakingFlag = false;
 }
 
-function fallback(text: string) {
-  if (typeof window === "undefined" || !window.speechSynthesis) return;
+type Hooks = { onStart?: () => void; onEnd?: () => void };
+
+function fallback(text: string, hooks?: Hooks) {
+  if (typeof window === "undefined" || !window.speechSynthesis) { hooks?.onEnd?.(); return; }
   const u = new SpeechSynthesisUtterance(text);
+  u.onstart = () => hooks?.onStart?.();
+  u.onend = () => hooks?.onEnd?.();
+  u.onerror = () => hooks?.onEnd?.();
   u.rate = 1.02;
   const voices = window.speechSynthesis.getVoices();
   const pick = voices.find((v) => /Samantha|Daniel|Google US English|Karen|Alex/i.test(v.name)) ?? voices[0];
@@ -60,8 +65,8 @@ function fallback(text: string) {
   window.speechSynthesis.speak(u);
 }
 
-export async function speak(text: string): Promise<void> {
-  if (!text?.trim()) return;
+export async function speak(text: string, hooks?: Hooks): Promise<void> {
+  if (!text?.trim()) { hooks?.onEnd?.(); return; }
   stopSpeaking();
   const my = ++seq;
   speakingFlag = true;
@@ -73,13 +78,14 @@ export async function speak(text: string): Promise<void> {
     if (my !== seq) return;
     const a = el();
     const url = URL.createObjectURL(blob);
-    a.onended = () => { if (my === seq) speakingFlag = false; URL.revokeObjectURL(url); };
-    a.onerror = () => { if (my === seq) speakingFlag = false; };
+    a.onended = () => { if (my === seq) speakingFlag = false; URL.revokeObjectURL(url); hooks?.onEnd?.(); };
+    a.onerror = () => { if (my === seq) speakingFlag = false; hooks?.onEnd?.(); };
+    a.onplaying = () => hooks?.onStart?.();
     a.src = url;
     await a.play();
   } catch {
     if (my !== seq) return;
     speakingFlag = false;
-    fallback(text);
+    fallback(text, hooks);
   }
 }

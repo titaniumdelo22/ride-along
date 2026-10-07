@@ -230,3 +230,32 @@ Verify against the frame yourself. Then write the new remaining steps that fix e
   for (const st of res.parsed_output.remainingSteps) st.parts = st.parts.map((p) => p.toLowerCase().trim()).filter((p) => LABELS.includes(p));
   return res.parsed_output;
 }
+
+export const Answer = z.object({
+  say: z.string().describe("The spoken answer: one to three short, plain sentences. Specific to this machine and what the camera shows."),
+});
+
+/** Ask Ray anything, any time: what's this, what do I need, what happens next, is this right. Fast model. */
+export async function askRay(question: string, frame: string | null, ctx: { tab: string; problem?: string; plan?: FixPlan | null; current?: number; inView?: string[] }): Promise<string> {
+  const content: Anthropic.ContentBlockParam[] = [];
+  if (frame) { content.push({ type: "text", text: "What the camera shows right now:" }); content.push(img(frame)); }
+  const step = ctx.plan?.steps[ctx.current ?? 0];
+  content.push({
+    type: "text",
+    text: `The learner is on the ${ctx.tab} screen.
+${ctx.inView?.length ? `Parts currently labeled in view: ${ctx.inView.join(", ")}.` : ""}
+${ctx.problem ? `What they're working on: "${ctx.problem}".` : ""}
+${ctx.plan ? `Diagnosis: ${ctx.plan.diagnosis}\nTools: ${ctx.plan.tools.join(", ")}\nSteps: ${ctx.plan.steps.map((s, i) => `${i + 1}. ${s.title}`).join("; ")}` : ""}
+${step ? `They are on step ${(ctx.current ?? 0) + 1}: "${step.title}". ${step.instruction}` : ""}
+They ask: "${question}"
+Answer like a journeyman on a call: direct, short, about this exact machine. If they ask what they need, list the tools. If they ask what's happening, explain the current step and why. Name parts by where they are.`,
+  });
+  const res = await anthropic().messages.parse({
+    model: WATCH_MODEL,
+    max_tokens: 400,
+    system: COACH,
+    output_config: { effort: "low", format: zodOutputFormat(Answer) },
+    messages: [{ role: "user", content }],
+  });
+  return res.parsed_output?.say ?? "Say that again?";
+}
