@@ -444,6 +444,14 @@ export default function CallPage() {
   );
 
   // ── Plan ──────────────────────────────────────────────────────────────────
+  // Start where they are: if they're already partway, the steps before it count as done (no XP for them).
+  const loadPlan = useCallback((p: Plan) => {
+    const at = Math.max(0, Math.min(Math.round(Number(p.startAt) || 0), p.steps.length - 1));
+    setPlan(p);
+    setCurrent(at);
+    clearedRef.current = new Set(Array.from({ length: at }, (_, i) => i));
+  }, []);
+
   const begin = useCallback(async (override?: string, known?: Kit) => {
     setError(null);
     setPhase("planning");
@@ -495,14 +503,14 @@ export default function CallPage() {
           if (!d.plan) throw new Error(d.error ?? "no plan");
           // Keep what's already on screen (the item and the gear) so nothing jumps.
           // The label read from the steps call wins if the gear call didn't get one.
-          setPlan({ ...d.plan, product: k.product.model || !d.plan.product.model ? k.product : d.plan.product, tools: k.tools });
+          loadPlan({ ...d.plan, product: k.product.model || !d.plan.product.model ? k.product : d.plan.product, tools: k.tools });
         })
         .catch(() => job === jobRef.current && setPlanFailed(true));
     } catch {
       setError("Your pro couldn't load that job. Try again.");
       setPhase("setup");
     }
-  }, [task, level, scanLabel, capture, speak, unlock, live]);
+  }, [task, level, scanLabel, capture, speak, unlock, live, loadPlan]);
 
   // ── "What am I looking at?" ───────────────────────────────────────────────
   const lookAt = useCallback(
@@ -551,10 +559,10 @@ export default function CallPage() {
       .then((d: { plan?: Plan }) => {
         if (job !== jobRef.current) return;
         if (!d.plan) throw new Error("no plan");
-        setPlan({ ...d.plan, product: kit.product, tools: kit.tools });
+        loadPlan({ ...d.plan, product: kit.product, tools: kit.tools });
       })
       .catch(() => job === jobRef.current && setPlanFailed(true));
-  }, [kit, task, level]);
+  }, [kit, task, level, loadPlan]);
 
   // Back one step (or jump to any step from the map): no penalty, Ray re-explains it.
   const goTo = useCallback(
@@ -579,8 +587,8 @@ export default function CallPage() {
     startedAt.current = Date.now();
     setPhase("guiding");
     award(10 * plan.tools.length, ["🎒 Geared up"]);
-    speak(`${plan.intro} Step one: ${plan.steps[0].instruction}`);
-  }, [plan, award, speak]);
+    speak(`${plan.intro} ${current > 0 ? `Picking up at step ${current + 1}` : "Step one"}: ${plan.steps[current].instruction}`);
+  }, [plan, current, award, speak]);
 
   // ── Watch loop ────────────────────────────────────────────────────────────
   const tick = useCallback(
@@ -1133,7 +1141,7 @@ export default function CallPage() {
               value={MISSIONS.some((m) => m.task === task) ? "" : task}
               onChange={(e) => setTask(e.target.value)}
               className="min-w-0 flex-1 border-b border-white/25 bg-transparent py-2 text-lg outline-none placeholder:text-white/45"
-              placeholder="Or say it, or type it"
+              placeholder="Say it, or where you're stuck"
             />
           </form>
         </div>
@@ -1269,7 +1277,7 @@ export default function CallPage() {
           <div className="mt-1 text-white/60">
             {kit.product.name}
             {kit.product.model ? ` · ${kit.product.model}` : ""} · {LEVEL_PICKS.find((l) => l.id === level)?.icon} {LEVEL_PICKS.find((l) => l.id === level)?.name}
-            {plan ? ` · ${plan.steps.length} steps` : ""}
+            {plan ? ` · ${plan.steps.length} steps${current > 0 ? ` · picking up at step ${current + 1}` : ""}` : ""}
           </div>
           <div className="mt-6 grid grid-cols-2 gap-3">
             {kit.tools.map((t, i) => {

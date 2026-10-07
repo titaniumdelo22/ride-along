@@ -40,6 +40,9 @@ export const Plan = z.object({
     .array(z.object({ icon: z.string().describe("ONE emoji for the tool"), name: z.string().describe("Short tool name, 1 to 3 words") }))
     .describe("Every tool and supply needed for this job, in the order they are used"),
   steps: z.array(Step).describe("4 to 8 steps, in order"),
+  startAt: z
+    .number()
+    .describe("0-based index of the step to start on. If they're already partway or stuck, the step they're stuck at (or the one quick safety check right before it), never the beginning. If they haven't started, 0."),
   intro: z.string().describe("What the coach says first: one warm short sentence, under 15 words"),
 });
 export type Plan = z.infer<typeof Plan>;
@@ -124,7 +127,7 @@ const COACH = `You are a patient journeyman with 25 years in the trades, on a li
 - The learner's hands are busy and they may not read well: everything important must be SAID, short and plain. Simple everyday words a 12-year-old knows; if you use a trade word, explain it in 3 words. Talk like a person on a call, not a manual. One short sentence at a time.
 - If you can't see what you need, tell them where to move the camera (aim) and say it.
 - Stay quiet when nothing needs saying (say: null). Never repeat yourself.
-- Only mark a step done when the camera clearly shows it.
+- Only mark a step done when the camera clearly shows it, or they tell you they already did it.
 - Point at the exact part you mean when it helps.
 - Safety beats speed, always.
 - Real jobs never go exactly to plan. Watch for curveballs: a leak, burn marks, a stuck screw, rust, a broken or missing part, a setup that doesn't match the plan. When one shows up, stay calm, say what you see, and add the steps to handle it. That is the most valuable thing you teach.`;
@@ -152,7 +155,8 @@ export async function plan(task: string, frame: string | null, level: Level = "n
     text: `The learner says they are working on: "${task || "the item in the camera"}".
 ${frame ? "The camera frame above may show the item and its label; read the model and serial number if you can." : ""}
 ${LEVEL_PLAN[level]}
-Write the step-by-step plan a journeyman would walk them through, hands-on, in order, with what you'll check on camera for each step, and every tool they need before they start.`,
+Write the step-by-step plan a journeyman would walk them through, hands-on, in order, with what you'll check on camera for each step, and every tool they need before they start.
+They may already be partway through ("I'm stuck at...", or the camera shows it half done). Then don't start over: write the whole job, set startAt to the step they're on or stuck at, and in the intro say where you're picking up. If a safety step before it (power off, water off) isn't clearly done, make the step at startAt ONE quick check that it is, right before the step they're stuck on.`,
   });
   const res = await anthropic().messages.parse({
     model: MODEL,
@@ -263,6 +267,7 @@ export const MOCK_PLAN: Plan = {
     { icon: "🧤", name: "Work gloves" },
     { icon: "🧻", name: "Towel" },
   ],
+  startAt: 0,
   intro: "Hey, I've got you. I can read the label: Clover D1, 120 volts, R134a refrigerant. When one of these stops getting cold, the first suspect is airflow. Let's check it the safe way.",
   steps: [
     { icon: "🔌", title: "Unplug the cooler", instruction: "Pull the plug out of the wall before you touch anything behind it.", check: "The plug is out of the outlet", why: "There's 120 volts to the compressor and a hot tank heater in there.", safety: "Never reach into the back of a plugged-in unit. The hot tank can also burn you.", skill: "Lockout and safety" },
