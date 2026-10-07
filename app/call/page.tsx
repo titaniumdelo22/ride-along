@@ -52,6 +52,9 @@ function said(raw: string, phrases: string[]): boolean {
 
 // Live, like FaceTime: a fresh look every 1.5 s, up to 2 in flight at once (each takes a few seconds round trip).
 const WATCH_EVERY_MS = 1500;
+// Points are off for now (less on screen): a finished step just gets "Nice!" and confetti.
+const SHOW_XP = false;
+const NICE = ["Nice!", "Clean!", "That's it!", "Nailed it!"];
 // What Ray says the instant he hears a question, so there's no dead air while he looks.
 const REBUILD = "Help me put this back together the way it was in my before photos.";
 const FILLERS = ["Okay, let me look.", "Got it. One sec.", "Mm, let me see.", "Okay, show me.", "Alright, let me look at that."];
@@ -255,6 +258,7 @@ export default function CallPage() {
   const [jobXp, setJobXp] = useState(0);
   const [combo, setCombo] = useState(0);
   const [popup, setPopup] = useState<{ amount: number; lines: string[]; key: number } | null>(null);
+  const [nice, setNice] = useState<{ word: string; key: number } | null>(null);
   const [toasts, setToasts] = useState<BadgeId[]>([]);
   const [levelUp, setLevelUp] = useState<string | null>(null);
   const [badges, setBadges] = useState<BadgeId[]>([]);
@@ -446,7 +450,7 @@ export default function CallPage() {
       }, 900);
     }
     setJobXp((j) => j + amount);
-    if (!quiet) setPopup({ amount, lines, key: Date.now() });
+    if (!quiet && SHOW_XP) setPopup({ amount, lines, key: Date.now() });
     cue("coin");
   }, []);
 
@@ -506,6 +510,10 @@ export default function CallPage() {
         amount += next * 10;
       }
       award(amount, lines);
+      if (!SHOW_XP) {
+        setNice({ word: NICE[Math.floor(Math.random() * NICE.length)], key: Date.now() });
+        burst();
+      }
       if (next >= 3) setTimeout(() => unlock("onfire"), 1400);
       if (index === 0) setTimeout(() => unlock("safety"), 1600);
       stepMistake.current = false;
@@ -1237,7 +1245,7 @@ export default function CallPage() {
               )}
             </span>
           </div>
-          <div className="mt-1 flex items-center gap-2">
+          <div className={`mt-1 flex items-center gap-2 ${SHOW_XP ? "" : "hidden"}`}>
             <span className="bg-bone px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-ink">{lvl.name}</span>
             <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-white/15">
               <div className="h-full rounded-full bg-hazard transition-all duration-700" style={{ width: `${Math.round(lvl.pct * 100)}%` }} />
@@ -1248,7 +1256,7 @@ export default function CallPage() {
       </div>
 
       {/* Combo */}
-      {phase === "guiding" && combo >= 2 && (
+      {phase === "guiding" && combo >= 2 && SHOW_XP && (
         <div key={combo} className="absolute left-4 top-[8.25rem] animate-[pop_.4s_ease-out] rounded-full bg-gradient-to-r from-[#FF3D6E] to-[#FF6B1A] px-4 py-1.5 text-lg font-black shadow-xl">
           🔥 x{combo}
         </div>
@@ -1315,7 +1323,12 @@ export default function CallPage() {
       )}
 
       {/* +XP */}
-      {popup && !levelUp && (
+      {nice && !SHOW_XP && (
+        <div key={nice.key} onAnimationEnd={() => setNice(null)} className="pointer-events-none absolute inset-x-0 top-[34%] z-20 animate-[floatUp_1.6s_ease-out_forwards] text-center">
+          <div className="font-display text-7xl uppercase text-bone drop-shadow-[0_4px_0_rgba(0,0,0,.6)]">{nice.word}</div>
+        </div>
+      )}
+      {popup && !levelUp && SHOW_XP && (
         <div key={popup.key} onAnimationEnd={() => setPopup(null)} className="pointer-events-none absolute inset-x-0 top-[38%] animate-[floatUp_1.8s_ease-out_forwards] text-center">
           <div className="text-6xl font-black text-[#FFD23F] drop-shadow-[0_4px_0_rgba(0,0,0,.5)]">+{popup.amount} XP</div>
           <div className="mt-1 space-x-2 text-sm font-bold">
@@ -1327,7 +1340,7 @@ export default function CallPage() {
       )}
 
       {/* Badge unlocked */}
-      {toast && (
+      {toast && SHOW_XP && (
         <div key={toast} className="pointer-events-none absolute inset-x-6 top-28 animate-[dropIn_2.6s_ease-out_forwards] rounded-3xl border border-[#FFD23F]/50 bg-gradient-to-br from-[#2A1A05] to-[#120A02] p-4 shadow-[0_0_40px_rgba(255,210,63,.35)]">
           <div className="flex items-center gap-4">
             <div className="grid h-16 w-16 place-items-center rounded-2xl bg-[#FFD23F]/15 text-5xl">{BADGES[toast].icon}</div>
@@ -1341,7 +1354,7 @@ export default function CallPage() {
       )}
 
       {/* Level up */}
-      {levelUp && (
+      {levelUp && SHOW_XP && (
         <div className="pointer-events-none absolute inset-0 grid place-items-center bg-black/40">
           <div className="animate-[pop_.5s_ease-out] text-center">
             <div className="text-sm font-mono font-bold uppercase tracking-[0.3em] text-[#FFD23F]">Level up</div>
@@ -1494,7 +1507,7 @@ export default function CallPage() {
               >
                 <span className="text-3xl">{m.icon}</span>
                 <span className="flex-1 font-display text-[1.65rem] uppercase leading-none tracking-wide">{m.title}</span>
-                <span className="text-sm font-bold text-[#FFD23F]">+{m.xp} XP</span>
+                {SHOW_XP && <span className="text-sm font-bold text-[#FFD23F]">+{m.xp} XP</span>}
               </button>
             ))}
           </div>
@@ -1743,7 +1756,7 @@ export default function CallPage() {
             })}
           </div>
           <div className="mt-3 text-center text-sm text-white/55">
-            {gear.size}/{kit.tools.length} ready · +{10 * kit.tools.length} XP for gearing up
+            {gear.size}/{kit.tools.length} ready
             {handsFree && <div className="mt-1 text-white/45">Say “let&apos;s go” when you&apos;re ready</div>}
           </div>
           {plan ? (
@@ -1778,7 +1791,7 @@ export default function CallPage() {
             <div className="min-w-0">
               <div className="text-xs font-mono font-bold uppercase tracking-[0.2em] text-[#FFB38A]">
                 Step {current + 1} / {plan.steps.length}{" "}
-                {(step as JobStep).surprise ? <span className="text-[#F59E0B]">· 🚧 Curveball</span> : <span className="text-[#FFD23F]">· +75 XP</span>}
+                {(step as JobStep).surprise ? <span className="text-[#F59E0B]">· 🚧 Curveball</span> : null}
               </div>
               <div className="font-display text-[2.1rem] uppercase leading-[0.95]">{step.title}</div>
             </div>
@@ -1858,9 +1871,9 @@ export default function CallPage() {
             <div className="mt-1 text-white/60">
               {plan.steps.length} steps · {mm}:{ss} · {mistakes.length} {mistakes.length === 1 ? "mistake" : "mistakes"}
             </div>
-            <div className="mt-6 text-7xl font-black text-[#FFD23F]">+{jobXp}</div>
-            <div className="text-sm font-bold uppercase tracking-widest text-white/60">XP earned · TradesQuest</div>
-            <div className="mx-auto mt-4 max-w-sm">
+            {SHOW_XP && <div className="mt-6 text-7xl font-black text-[#FFD23F]">+{jobXp}</div>}
+            {SHOW_XP && <div className="text-sm font-bold uppercase tracking-widest text-white/60">XP earned · TradesQuest</div>}
+            <div className={`mx-auto mt-4 max-w-sm ${SHOW_XP ? "" : "hidden"}`}>
               <div className="flex justify-between text-xs font-bold">
                 <span>{lvl.name}</span>
                 <span className="text-white/50">{lvl.next - xp} XP to next</span>

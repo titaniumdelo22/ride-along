@@ -55,7 +55,7 @@ export default function Home() {
             <li key={j.name}>
               <Link href={`/call?task=${encodeURIComponent(j.task)}&name=${encodeURIComponent(j.name)}`} className="flex items-baseline justify-between py-4 active:opacity-60">
                 <span className="font-display text-[1.9rem] uppercase leading-none tracking-wide">{j.name}</span>
-                <span className="font-mono text-xs text-hazard">+{j.xp} XP</span>
+                <span className="font-display text-2xl text-hazard">→</span>
               </Link>
             </li>
           ))}

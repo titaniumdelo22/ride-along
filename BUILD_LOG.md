@@ -43,6 +43,7 @@ Every line of code was written by AI (Claude Code, Claude Opus 5.5). Titanium di
 Tagline (Titanium): "Making DIY fun. Basically turning everyone into a tradesman."
 
 28. "It's scanning the parts but not noticing it's not screwed together. Also some type of loading bar so people can see it's actively scanning. It should be minimal clicking: the initial scan should generate a build process, like scan the water cooler and suggest 'put it back together'." Claude added a check on the scan page (Claude looks at the same camera every 8 s: is it put back together?) that pops a hazard banner, "Not put back together: side and back panels off" with what still has to go back, and one tap starts Ray's rebuild (the plan starts on its own, no extra pages). A running bar and a sweeping scan line show it's actively scanning.
+29. "Remove the XP for now, just say nice with the confetti and then move on, to remove some of the clutter on the screen." Claude turned off every XP display behind one switch (SHOW_XP): no XP bar, pop-ups, level-ups, combo chip or badge toasts during the job; a finished step shows a big "Nice!" with confetti and Ray moves to the next step.
 
 ## Philip's build (Scan page)
 Philip Mocanu built the Scan page (/glasses) in parallel with his own AI coding assistant. This is his work in the order he committed it, summarized from his commit messages (Philip can add his exact prompt wording here):
