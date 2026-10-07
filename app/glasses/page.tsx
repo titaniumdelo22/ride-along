@@ -73,7 +73,7 @@ export default function GlassesPage() {
       setStatus("Looking…");
       return true;
     } catch (e) {
-      console.error(e);
+      console.warn("camera:", (e as Error).name);
       return false;
     }
   }, []);
