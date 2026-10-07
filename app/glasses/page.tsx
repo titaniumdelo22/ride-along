@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import GlassesOverlay, { type OverlayPart } from "@/components/GlassesOverlay";
 import { PARTS, byLabel } from "@/lib/parts";
+import { MotionTracker } from "@/lib/motion";
 
 /**
  * Glasses view: live camera, every known part tinted in its color and labeled.
@@ -21,6 +22,13 @@ export default function GlassesPage() {
   const [seen, setSeen] = useState<Set<string>>(new Set());
   const [err, setErr] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
+  const tracker = useRef<MotionTracker | null>(null);
+  const captureTotal = useRef({ x: 0, y: 0 }); // tracker.total at the moment the last *applied* detection frame was grabbed
+  const pendingTotal = useRef({ x: 0, y: 0 }); // tracker.total when the in-flight frame was grabbed
+  const [drift, setDrift] = useState({ dx: 0, dy: 0 });
+  const [tracking, setTracking] = useState(true);
+  const trackingRef = useRef(tracking);
+  trackingRef.current = tracking;
   const useMasksRef = useRef(useMasks);
   const pausedRef = useRef(paused);
   useMasksRef.current = useMasks;
@@ -48,10 +56,16 @@ export default function GlassesPage() {
           const c = document.createElement("canvas");
           c.width = im.naturalWidth; c.height = im.naturalHeight;
           const ctx = c.getContext("2d")!;
-          const paint = () => ctx.drawImage(im, 0, 0);
+          // Slowly slide the photo so the tracker has motion to follow (simulates a handheld pan).
+          const t0 = Date.now();
+          const paint = () => {
+            const t = (Date.now() - t0) / 1000;
+            ctx.fillStyle = "#111"; ctx.fillRect(0, 0, c.width, c.height);
+            ctx.drawImage(im, Math.sin(t / 2) * c.width * 0.06, Math.cos(t / 3) * c.height * 0.03);
+          };
           paint();
-          const iv = setInterval(paint, 500);
-          stream = c.captureStream(2);
+          const iv = setInterval(paint, 33);
+          stream = c.captureStream(30);
           const v = videoRef.current!;
           v.srcObject = stream;
           await v.play();
@@ -109,6 +123,25 @@ export default function GlassesPage() {
     });
   }, []);
 
+  // motion loop: keep labels glued to the parts between detections
+  useEffect(() => {
+    tracker.current = new MotionTracker();
+    let raf = 0;
+    const tick = () => {
+      const v = videoRef.current, t = tracker.current;
+      if (v && t && v.readyState >= 2 && !pausedRef.current) {
+        t.step(v);
+        if (trackingRef.current) {
+          // Picture moved right by dx => the part is now further right on screen => shift labels by +dx.
+          setDrift({ dx: t.total.x - captureTotal.current.x, dy: t.total.y - captureTotal.current.y });
+        } else setDrift({ dx: 0, dy: 0 });
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
   // fast loop: boxes
   useEffect(() => {
     let stop = false;
@@ -118,12 +151,14 @@ export default function GlassesPage() {
         if (pausedRef.current) { await new Promise((r) => setTimeout(r, 200)); continue; }
         const frame = grab(480, 0.6);
         if (!frame) { await new Promise((r) => setTimeout(r, 200)); continue; }
+        pendingTotal.current = { ...(tracker.current?.total ?? { x: 0, y: 0 }) };
         const t0 = Date.now();
         try {
           const res = await fetch("/api/parts", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ frame, mode: "boxes" }) });
           const j = (await res.json()) as { parts?: OverlayPart[]; error?: string };
           if (j.error) throw new Error(j.error);
           lastBoxes = j.parts ?? [];
+          captureTotal.current = pendingTotal.current;
           merge(lastBoxes);
           setMs((m) => ({ ...m, box: Date.now() - t0 }));
           setErr(null);
@@ -189,7 +224,7 @@ export default function GlassesPage() {
     <main className="h-dvh w-screen bg-black text-white overflow-hidden relative select-none">
       <div ref={wrapRef} className="absolute inset-0">
         <video ref={videoRef} playsInline muted className="h-full w-full object-cover" />
-        {view.w > 0 && <GlassesOverlay parts={parts} view={view} drift={{ dx: 0, dy: 0, s: 1 }} selected={selected} onTap={onTap} />}
+        {view.w > 0 && <GlassesOverlay parts={parts} view={view} drift={drift} selected={selected} onTap={onTap} />}
       </div>
 
       {/* top bar */}
@@ -213,6 +248,7 @@ export default function GlassesPage() {
       {/* bottom bar */}
       <div className="absolute bottom-0 inset-x-0 p-3 pb-6 flex items-center gap-2 bg-gradient-to-t from-black/80 to-transparent text-xs">
         <button onClick={() => setPaused((p) => !p)} className="rounded-full bg-white/15 px-3 py-2 font-semibold backdrop-blur">{paused ? "Resume" : "Freeze"}</button>
+        <button onClick={() => setTracking((t) => !t)} className={`rounded-full px-3 py-2 font-semibold backdrop-blur ${tracking ? "bg-white/25" : "bg-white/15 text-white/60"}`}>Track {tracking ? "on" : "off"}</button>
         <button onClick={() => setUseMasks((m) => !m)} className={`rounded-full px-3 py-2 font-semibold backdrop-blur ${useMasks ? "bg-[#FF6B1A] text-black" : "bg-white/15"}`}>Outlines {useMasks ? "on" : "off"}</button>
         <Link href="/call" className="rounded-full bg-white/15 px-3 py-2 font-semibold backdrop-blur">Call my pro →</Link>
         <span className="ml-auto text-white/60 tabular-nums">boxes {ms.box ? `${(ms.box / 1000).toFixed(1)}s` : "–"} · outlines {ms.mask ? `${(ms.mask / 1000).toFixed(1)}s` : "–"}</span>

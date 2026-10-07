@@ -7,8 +7,8 @@ type Props = {
   parts: OverlayPart[];
   /** Size of the video element on screen and the intrinsic video size, so we map 0..1 coords through object-fit: cover. */
   view: { w: number; h: number; vw: number; vh: number };
-  /** Extra transform applied while waiting for the next detection (dx, dy in px, scale around center). */
-  drift: { dx: number; dy: number; s: number };
+  /** Shift to apply while waiting for the next detection, in fractions of the frame (camera moved since capture). */
+  drift: { dx: number; dy: number };
   selected?: string | null;
   onTap?: (label: string | null) => void;
 };
@@ -49,13 +49,7 @@ export default function GlassesOverlay({ parts, view, drift, selected, onTap }: 
     const scale = Math.max(view.w / view.vw, view.h / view.vh);
     const dw = view.vw * scale, dh = view.vh * scale;
     const ox = (view.w - dw) / 2, oy = (view.h - dh) / 2;
-    const map = (x: number, y: number) => {
-      let px = ox + x * dw, py = oy + y * dh;
-      const cx = view.w / 2, cy = view.h / 2;
-      px = cx + (px - cx) * drift.s + drift.dx;
-      py = cy + (py - cy) * drift.s + drift.dy;
-      return [px, py] as const;
-    };
+    const map = (x: number, y: number) => [ox + (x + drift.dx) * dw, oy + (y + drift.dy) * dh] as const;
 
     let raf = 0;
     const draw = () => {
