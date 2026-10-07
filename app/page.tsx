@@ -2,6 +2,7 @@ import Link from "next/link";
 import RayFace from "./call/RayFace";
 
 const JOBS = [
+  { name: "Put it back together", task: "I took this apart. Help me put it back together the right way, every screw and tube where it goes.", xp: 500 },
   { name: "Mount a TV", task: "I want to mount my TV on the wall. Teach me to do it right.", xp: 300 },
   { name: "Fix a leaky faucet", task: "My kitchen faucet drips. Teach me to fix it.", xp: 350 },
   { name: "Cooler won't cool", task: "This water cooler has an out of order sign. I know nothing about it. Help me fix it.", xp: 400 },
@@ -60,7 +61,10 @@ export default function Home() {
           ))}
         </ul>
 
-        <div className="mt-14 grid grid-cols-3 gap-3 font-mono text-[11px] uppercase tracking-wider text-bone/55">
+        <p className="mt-14 text-lg leading-snug text-bone/80">
+          Every job Ray checks on camera counts toward a certificate. <span className="text-bone">Learn at home. Get hired.</span>
+        </p>
+        <div className="mt-6 grid grid-cols-3 gap-3 font-mono text-[11px] uppercase tracking-wider text-bone/55">
           <div>
             <span className="block font-display text-5xl leading-none text-bone">01</span>Scan it
           </div>
@@ -68,7 +72,7 @@ export default function Home() {
             <span className="block font-display text-5xl leading-none text-bone">02</span>Ask Ray
           </div>
           <div>
-            <span className="block font-display text-5xl leading-none text-hazard">03</span>Level up
+            <span className="block font-display text-5xl leading-none text-hazard">03</span>Get certified
           </div>
         </div>
       </div>

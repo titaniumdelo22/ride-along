@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Anton, Archivo, Space_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -10,6 +10,16 @@ const mono = Space_Mono({ variable: "--font-spacemono", weight: ["400", "700"], 
 export const metadata: Metadata = {
   title: "Ride Along: a journeyman on call",
   description: "Make DIY fun. Turn anyone into a tradesman. Point your phone at it and Ray walks you through it.",
+};
+
+// No pinch or double-tap zoom: it's an app on a phone, held in one hand at a job.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: "cover",
+  themeColor: "#0B0B0B",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
