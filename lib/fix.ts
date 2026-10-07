@@ -43,7 +43,6 @@ export const FixWatch = z.object({
   aim: z.string().nullable().describe("If you need a different view, exactly where to point the camera and how close, else null"),
   anomalies: z.array(Anomaly).describe("Anything that looks wrong in THIS frame: a wire off a screw, a connector hanging, a part missing or damaged. Empty if everything visible looks normal. Never guess."),
   safety: z.string().nullable().describe("Urgent safety warning if something unsafe is happening, else null"),
-  replaceRemainingSteps: z.array(FixStep).nullable().describe("If what you see changes the plan, the NEW remaining steps after the current one (replace all later steps). Null to keep the plan."),
 });
 export type FixWatch = z.infer<typeof FixWatch>;
 export type Anomaly = z.infer<typeof Anomaly>;
@@ -107,8 +106,8 @@ export type WatchContext = {
 export async function watchFix(frame: string, ctx: WatchContext): Promise<FixWatch> {
   const step = ctx.plan.steps[ctx.current];
   const res = await anthropic().messages.parse({
-    model: PLAN_MODEL,
-    max_tokens: 2500,
+    model: WATCH_MODEL,
+    max_tokens: 900,
     system: COACH,
     output_config: { effort: "low", format: zodOutputFormat(FixWatch) },
     messages: [{ role: "user", content: [img(frame), { type: "text", text: `Problem the learner reported: "${ctx.problem}"
@@ -119,11 +118,38 @@ Done when the camera shows: ${step.check}
 ${ctx.history.length ? `What you saw on earlier looks (oldest first):
 ${ctx.history.map((h) => `- ${h}`).join("\n")}` : "This is your first look."}
 ${ctx.userSaid ? `The learner just said: "${ctx.userSaid}". Answer them directly in 'say'.` : "The learner said nothing new. Stay quiet (say: null) unless something needs saying or the view must change."}
-Look closely at THIS frame. Compare every visible wire, connector and part to how it should be. Report anomalies only when clearly visible. If what you see changes what should happen next, rewrite the remaining steps.` }] }],
+Look closely at THIS frame. Compare every visible wire, connector and part to how it should be. Report anomalies only when clearly visible.` }] }],
   });
   if (!res.parsed_output) throw new Error("no watch");
   const w = res.parsed_output;
   w.anomalies = w.anomalies.filter((a) => a.box_2d?.length === 4).map((a) => ({ ...a, part: a.part.toLowerCase().trim() }));
-  if (w.replaceRemainingSteps) for (const st of w.replaceRemainingSteps) st.parts = st.parts.map((p) => p.toLowerCase().trim()).filter((p) => LABELS.includes(p));
   return w;
+}
+
+export const Replan = z.object({
+  verdict: z.string().describe("One or two plain sentences: what the latest look means for the diagnosis"),
+  say: z.string().describe("What to say out loud now, one or two short sentences"),
+  remainingSteps: z.array(FixStep).describe("The NEW remaining steps after the current one, replacing all later steps. 1 to 6 steps. Specific: name the part and what correct looks like."),
+});
+export type Replan = z.infer<typeof Replan>;
+
+/** The smart model re-plans when a look found something. Fable 5.1, with the whole story and the frame. */
+export async function replanFix(frame: string, ctx: WatchContext, anomalies: Anomaly[]): Promise<Replan> {
+  const step = ctx.plan.steps[ctx.current];
+  const res = await anthropic().messages.parse({
+    model: PLAN_MODEL,
+    max_tokens: 2500,
+    system: COACH,
+    output_config: { effort: "low", format: zodOutputFormat(Replan) },
+    messages: [{ role: "user", content: [img(frame), { type: "text", text: `Problem the learner reported: "${ctx.problem}"
+Diagnosis so far: ${ctx.plan.diagnosis}
+Plan so far: ${ctx.plan.steps.map((s, i) => `${i + 1}. ${s.title}`).join("; ")}
+Current step ${ctx.current + 1}: "${step.title}".
+Earlier looks: ${ctx.history.map((h) => `- ${h}`).join("\n") || "(none)"}
+The quick look at this frame flagged: ${anomalies.map((a) => `${a.part}: ${a.issue}`).join("; ")}
+Verify against the frame yourself. Then write the new remaining steps that fix exactly what you see, in order, with what the camera must show for each. If the flag was wrong, say so and keep sensible steps.` }] }],
+  });
+  if (!res.parsed_output) throw new Error("no replan");
+  for (const st of res.parsed_output.remainingSteps) st.parts = st.parts.map((p) => p.toLowerCase().trim()).filter((p) => LABELS.includes(p));
+  return res.parsed_output;
 }

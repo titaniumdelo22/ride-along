@@ -5,7 +5,7 @@ import GlassesOverlay, { type OverlayPart, type OverlayAnomaly } from "@/compone
 import { PARTS, byLabel } from "@/lib/parts";
 import { MotionTracker } from "@/lib/motion";
 import ScanDrawer, { type Mode } from "@/components/ScanDrawer";
-import type { FixPlan, FixWatch } from "@/lib/fix";
+import type { FixPlan, FixWatch, Replan } from "@/lib/fix";
 
 /**
  * Glasses view: live camera, every known part tinted in its color and labeled.
@@ -43,6 +43,7 @@ export default function GlassesPage() {
   const historyRef = useRef<string[]>([]);
   const [anomalies, setAnomalies] = useState<OverlayAnomaly[]>([]);
   const [looking, setLooking] = useState(false);
+  const replannedStep = useRef(-1); // step index we already re-planned from (one re-plan per step)
   const [listening, setListening] = useState(false);
   const modeRef = useRef(mode); modeRef.current = mode;
   const planRef = useRef(plan); planRef.current = plan;
@@ -295,6 +296,7 @@ export default function GlassesPage() {
     const st = plan.steps[stepIndex];
     if (!st) return;
     setLastSay(null); setAnomalies([]);
+    if (stepIndex === 0) replannedStep.current = -1;
     speak(stepIndex === 0 ? `${plan.intro} ${plan.diagnosis} First: ${st.instruction}` : `${st.title}. ${st.instruction}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, plan, stepIndex]);
@@ -320,10 +322,22 @@ export default function GlassesPage() {
           if (w.error) continue;
           historyRef.current = [...historyRef.current, w.see].slice(-6);
           setAnomalies(w.anomalies.map((an) => ({ part: an.part, issue: an.issue, box: [an.box_2d[1] / 1000, an.box_2d[0] / 1000, an.box_2d[3] / 1000, an.box_2d[2] / 1000] as [number, number, number, number] })));
-          if (w.replaceRemainingSteps && w.replaceRemainingSteps.length && stepRef.current === idx) {
-            const next = { ...pl, steps: [...pl.steps.slice(0, idx + 1), ...w.replaceRemainingSteps] };
-            setPlan(next);
-            setLastSay("Plan updated from what I can see.");
+          if (w.anomalies.length && replannedStep.current !== idx && stepRef.current === idx) {
+            // Something looks wrong: hand the frame and the whole story to the smart model to re-plan.
+            replannedStep.current = idx;
+            setLastSay(`I see ${w.anomalies.map((an) => an.issue).join(", and ")}. Let me think about what to do.`);
+            speak(`I see ${w.anomalies.map((an) => an.issue).join(", and ")}. Give me a second.`);
+            try {
+              const r2 = await fetch("/api/fix", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: "replan", frame, problem: problemRef.current, plan: pl, current: idx, history: historyRef.current, anomalies: w.anomalies }) });
+              const rp = (await r2.json()) as Replan & { error?: string };
+              if (!rp.error && rp.remainingSteps.length && stepRef.current === idx) {
+                setPlan({ ...pl, steps: [...pl.steps.slice(0, idx + 1), ...rp.remainingSteps] });
+                historyRef.current = [...historyRef.current, `Re-planned: ${rp.verdict}`].slice(-6);
+                setLastSay(rp.say); speak(rp.say);
+                setStepIndex(idx + 1);
+              }
+            } catch { /* keep the old plan */ }
+            continue;
           }
           if (w.safety) { setLastSay(w.safety); speak(w.safety); continue; }
           const line = w.say ?? (w.anomalies.length ? `I see ${w.anomalies.map((an) => an.issue).join(", and ")}.` : null) ?? w.aim;
