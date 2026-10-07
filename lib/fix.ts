@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import { PARTS, LABELS } from "./parts";
+import { referenceSet } from "./reference";
 
 /**
  * Fix flow for the Scan page.
@@ -57,6 +58,8 @@ How this unit is laid out (the back cover is already removed for the demo, so th
 - Inside the back: compressor (black dome) with its relay box, filter dryer and coiled capillary tube in copper, black foam-wrapped hot tank, a gray terminal block with three screws on the floor where the green ground wire and white wires are held, a harness of red/yellow/white/brown wires with spade connectors, red rocker hot water switch, data plate, power cord. Condenser coils are the black grid on the back.
 
 Diagnose from what the learner tells you and what you can see in the camera. Do not assume a cause; ask them to show you things and reason like a technician.
+The learner may ask for a repair ("cold light is off"), a check ("is everything connected right?") or a job ("I want to clean this up", "show me how the wiring works"). Plan for what they asked.
+Compare the live view to the REFERENCE photos of this exact unit whenever you have them: point out any difference you can clearly see and build the steps around it.
 Rules for steps:
 - The back cover is off, so steps must send the camera INSIDE: close on the terminal block, the relay, each connector, the switch. "Hold the phone about 20 cm from the terminal block so I can see all three screws" is a good instruction; "show me the back" is not.
 - Each instruction names the exact part and what CORRECT looks like, so the learner can compare.
@@ -68,6 +71,15 @@ Rules for calling something wrong:
 
 Known parts of this machine (use these exact names when you refer to them):
 ${PARTS_DESC}`;
+
+function referenceBlocks(kind: "all" | "inside"): Anthropic.ContentBlockParam[] {
+  const refs = referenceSet(kind);
+  if (!refs.length) return [];
+  const out: Anthropic.ContentBlockParam[] = [{ type: "text", text: `REFERENCE: ${refs.length} photo(s) of THIS exact unit with the back cover off and the power cord UNPLUGGED. The wiring and parts are untouched, so this is the correct layout. Because it was unplugged, the indicator lights are off in these photos; that is normal for the reference, not a fault. Compare the live photos against these; a difference (a wire off its screw, a connector hanging, a part moved or missing, a screw backed out) is the clue.` }];
+  refs.forEach((r, i) => { out.push({ type: "text", text: `Reference ${i + 1}: ${r.what}` }); out.push(img(r.b64)); });
+  out.push({ type: "text", text: "END OF REFERENCE. Everything below is live." });
+  return out;
+}
 
 let client: Anthropic | null = null;
 const anthropic = () => (client ??= new Anthropic());
@@ -89,12 +101,12 @@ export type Intake = z.infer<typeof Intake>;
 
 /** Guided intake: given the problem and the photos so far, decide what to look at next. Fast model. */
 export async function intakeNext(problem: string, photos: string[], maxShots: number): Promise<Intake> {
-  const content: Anthropic.ContentBlockParam[] = [];
-  photos.forEach((f, i) => { content.push({ type: "text", text: `Photo ${i + 1}:` }); content.push(img(f)); });
+  const content: Anthropic.ContentBlockParam[] = [...referenceBlocks("all")];
+  photos.forEach((f, i) => { content.push({ type: "text", text: `Live photo ${i + 1}:` }); content.push(img(f)); });
   content.push({
     type: "text",
     text: `The learner says: "${problem}".
-${photos.length ? `You have ${photos.length} photo(s) above.` : "You have no photos yet. Ask for the first one: a clear overall view of the side of the machine with the problem."}
+${photos.length ? `You have ${photos.length} live photo(s) above. Compare them to the reference photos.` : "You have no photos yet. Ask for the first one: a clear overall view of the side of the machine with the problem."}
 You may ask for at most ${maxShots} photos in total. Think like a technician arriving on site: what do you need to SEE to diagnose this? The back cover is already off, so the inside (terminal block, relay, connectors, harness, switch) is reachable with a close shot. Ask for one specific view at a time. When you can diagnose, say enough.`,
   });
   const res = await anthropic().messages.parse({
@@ -112,9 +124,9 @@ You may ask for at most ${maxShots} photos in total. Think like a technician arr
 }
 
 export async function planFix(problem: string, frame: string | null, photos: string[] = [], notes: string[] = []): Promise<FixPlan> {
-  const content: Anthropic.ContentBlockParam[] = [];
+  const content: Anthropic.ContentBlockParam[] = [...referenceBlocks("all")];
   const all = photos.length ? photos : frame ? [frame] : [];
-  all.forEach((f, i) => { content.push({ type: "text", text: `Photo ${i + 1}:` }); content.push(img(f)); });
+  all.forEach((f, i) => { content.push({ type: "text", text: `Live photo ${i + 1}:` }); content.push(img(f)); });
   content.push({
     type: "text",
     text: `The learner says: "${problem}".
@@ -151,7 +163,7 @@ export async function watchFix(frame: string, ctx: WatchContext): Promise<FixWat
     max_tokens: 900,
     system: COACH,
     output_config: { effort: "low", format: zodOutputFormat(FixWatch) },
-    messages: [{ role: "user", content: [img(frame), { type: "text", text: `Problem the learner reported: "${ctx.problem}"
+    messages: [{ role: "user", content: [...referenceBlocks("inside"), { type: "text", text: "LIVE camera frame:" }, img(frame), { type: "text", text: `Problem the learner reported: "${ctx.problem}"
 Your diagnosis so far: ${ctx.plan.diagnosis}
 Plan: ${ctx.plan.steps.map((s, i) => `${i + 1}. ${s.title}`).join("; ")}
 Current step ${ctx.current + 1}: "${step.title}". Instruction: ${step.instruction}
@@ -159,7 +171,7 @@ Done when the camera shows: ${step.check}
 ${ctx.history.length ? `What you saw on earlier looks (oldest first):
 ${ctx.history.map((h) => `- ${h}`).join("\n")}` : "This is your first look."}
 ${ctx.userSaid ? `The learner just said: "${ctx.userSaid}". Answer them directly in 'say'.` : "The learner said nothing new. Stay quiet (say: null) unless something needs saying or the view must change."}
-Look closely at THIS frame. Compare every visible wire, connector and part to how it should be. Report anomalies only when clearly visible.` }] }],
+Look closely at the LIVE frame and compare it to the reference photos of this same unit. Report an anomaly only when you can clearly see a difference from the reference or clear damage.` }] }],
   });
   if (!res.parsed_output) throw new Error("no watch");
   const w = res.parsed_output;
@@ -182,7 +194,7 @@ export async function replanFix(frame: string, ctx: WatchContext, anomalies: Ano
     max_tokens: 2500,
     system: COACH,
     output_config: { effort: "low", format: zodOutputFormat(Replan) },
-    messages: [{ role: "user", content: [img(frame), { type: "text", text: `Problem the learner reported: "${ctx.problem}"
+    messages: [{ role: "user", content: [...referenceBlocks("all"), { type: "text", text: "LIVE camera frame:" }, img(frame), { type: "text", text: `Problem the learner reported: "${ctx.problem}"
 Diagnosis so far: ${ctx.plan.diagnosis}
 Plan so far: ${ctx.plan.steps.map((s, i) => `${i + 1}. ${s.title}`).join("; ")}
 Current step ${ctx.current + 1}: "${step.title}".

@@ -1,11 +1,43 @@
 "use client";
 /**
- * Ray's voice on the client. Tries the cloned Cartesia voice via /api/tts; if that isn't available,
- * falls back to the phone's built-in speech so the demo never goes silent.
+ * Ray's voice on the client. Plays the cloned Cartesia voice via /api/tts through ONE reused <audio> element.
+ * iPhone Safari only lets audio play if that element was first started inside a tap, so we "unlock" it on the
+ * first touch anywhere on the page. If Cartesia fails, falls back to the phone's built-in speech.
  */
 let audio: HTMLAudioElement | null = null;
+let unlocked = false;
 let speakingFlag = false;
 let seq = 0;
+
+// 0.1 s of silence, used to unlock the audio element inside a user gesture.
+const SILENT = "/silence.wav";
+
+function el(): HTMLAudioElement {
+  if (!audio) {
+    audio = new Audio();
+    audio.setAttribute("playsinline", "");
+    audio.preload = "auto";
+  }
+  return audio;
+}
+
+export function unlockAudio() {
+  if (unlocked || typeof window === "undefined") return;
+  const a = el();
+  a.src = SILENT;
+  a.play().then(() => { unlocked = true; }).catch(() => {});
+  // also wake speechSynthesis on iOS
+  try { window.speechSynthesis?.speak(new SpeechSynthesisUtterance(" ")); } catch {}
+}
+
+if (typeof window !== "undefined") {
+  // keep trying on every tap until it's unlocked (some taps don't count as a gesture on iOS)
+  const tryUnlock = () => { if (!unlocked) unlockAudio(); };
+  window.addEventListener("touchend", tryUnlock, { passive: true });
+  window.addEventListener("click", tryUnlock);
+}
+
+export function voiceUnlocked() { return unlocked; }
 
 export function isSpeaking(): boolean {
   return speakingFlag || (typeof window !== "undefined" && !!window.speechSynthesis?.speaking);
@@ -13,7 +45,7 @@ export function isSpeaking(): boolean {
 
 export function stopSpeaking() {
   seq++;
-  if (audio) { audio.pause(); audio.src = ""; audio = null; }
+  if (audio) audio.pause();
   if (typeof window !== "undefined") window.speechSynthesis?.cancel();
   speakingFlag = false;
 }
@@ -35,15 +67,16 @@ export async function speak(text: string): Promise<void> {
   speakingFlag = true;
   try {
     const r = await fetch("/api/tts", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
-    if (my !== seq) return; // superseded
+    if (my !== seq) return;
     if (!r.ok) throw new Error(await r.text());
     const blob = await r.blob();
     if (my !== seq) return;
+    const a = el();
     const url = URL.createObjectURL(blob);
-    audio = new Audio(url);
-    audio.onended = () => { if (my === seq) speakingFlag = false; URL.revokeObjectURL(url); };
-    audio.onerror = () => { if (my === seq) speakingFlag = false; };
-    await audio.play();
+    a.onended = () => { if (my === seq) speakingFlag = false; URL.revokeObjectURL(url); };
+    a.onerror = () => { if (my === seq) speakingFlag = false; };
+    a.src = url;
+    await a.play();
   } catch {
     if (my !== seq) return;
     speakingFlag = false;

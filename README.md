@@ -10,12 +10,16 @@ npm run dev          # http://localhost:3000
 cloudflared tunnel --url http://localhost:3000   # prints an https link for the phone
 ```
 
-`.env.local` needs:
+`.env.local` needs (ask Philip for the file; never commit it, this repo is public):
 
 ```
-ANTHROPIC_API_KEY=...   # coach (Call view)
-GEMINI_API_KEY=...      # part detection (Glasses view)
+ANTHROPIC_API_KEY=...    # Ray's brain: plans, step checks (Claude Fable 5.1 / Opus 5.5)
+GEMINI_API_KEY=...       # live part labels on the Scan page
+CARTESIA_API_KEY=...     # Ray's cloned voice "Chris"
+CARTESIA_VOICE_ID=...    # optional, skips looking the voice up by name
 ```
+
+After pulling: `npm install`, then restart `npm run dev`. On the phone, tap once after the camera starts so iPhone allows the voice.
 
 Open the https link on the phone → **Scan it** → allow the camera → point at the cooler. Tap any colored part to hear what it does. **Ask Ray** switches to the hands-free, step-by-step coach.
 
