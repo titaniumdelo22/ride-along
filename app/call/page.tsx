@@ -228,6 +228,7 @@ export default function CallPage() {
   const [jobBefores, setJobBefores] = useState<string[]>([]);
   const [zoom, setZoom] = useState<string | null>(null);
   const [found, setFound] = useState<Identify | null>(null);
+  const [showAll, setShowAll] = useState(false); // one ring on the most important thing; the rest only when asked
   const [foundMode, setFoundMode] = useState<"what" | "parts">("what");
   const [looking, setLooking] = useState(false);
   const [snap, setSnap] = useState<{ src: string; w: number; h: number } | null>(null);
@@ -611,6 +612,7 @@ export default function CallPage() {
       setError(null);
       setPhase("identify");
       setFound(null);
+      setShowAll(false);
       setFoundMode(mode);
       setLooking(true);
       try {
@@ -632,6 +634,29 @@ export default function CallPage() {
         setFound(d.result);
         setLive(d.live !== false);
         speak(d.result.say);
+        // Claude picks what matters; Gemini finds exactly where it is. The ring slides onto the right spot.
+        const r = d.result;
+        const names = [r.focus?.label, ...r.parts.map((p) => p.label)].filter((n): n is string => !!n);
+        if (frame && names.length) {
+          fetch("/api/locate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ frame, names }) })
+            .then((x) => x.json())
+            .then((l: { spots?: { label: string; x: number; y: number }[] }) => {
+              const spot = (name: string) => l.spots?.find((s) => s.label.trim().toLowerCase() === name.trim().toLowerCase());
+              setFound((f) => {
+                if (f !== r) return f;
+                const fs = f.focus && spot(f.focus.label);
+                return {
+                  ...f,
+                  focus: f.focus && fs ? { ...f.focus, x: fs.x, y: fs.y } : f.focus,
+                  parts: f.parts.map((p) => {
+                    const s = spot(p.label);
+                    return s ? { ...p, x: s.x, y: s.y } : p;
+                  }),
+                };
+              });
+            })
+            .catch(() => {});
+        }
         // Write the steps ahead while they read: the rebuild (with their before photos) after a parts check.
         const rebuild = mode === "parts" && befores.length > 0;
         const m = d.result.missions[0];
@@ -1444,7 +1469,24 @@ export default function CallPage() {
           </div>
         </>
       )}
+      {/* The ONE thing to look at first: a big ring, easy to follow */}
       {phase === "identify" &&
+        found?.focus &&
+        !showAll &&
+        (() => {
+          const at = onSnap(found.focus.x, found.focus.y);
+          if (!at) return null;
+          return (
+            <button onClick={() => found.focus && speak(`${found.focus.label}. ${found.focus.why}`)} className="absolute animate-[pop_.4s_ease-out] transition-all duration-700 ease-out" style={{ left: at.left, top: at.top }}>
+              <span className="absolute -left-12 -top-12 h-24 w-24 animate-ping rounded-full border-[5px] border-[#FF6B1A] opacity-50" />
+              <span className="absolute -left-10 -top-10 h-20 w-20 rounded-full border-[5px] border-[#FF6B1A] shadow-[0_0_30px_#FF6B1A]" />
+              <span className="absolute -left-2 -top-2 h-4 w-4 rounded-full bg-[#FF6B1A]" />
+              <span className="absolute left-0 top-12 -translate-x-1/2 whitespace-nowrap rounded-2xl bg-[#FF6B1A] px-4 py-2 text-lg font-black shadow-xl">👉 {found.focus.label}</span>
+            </button>
+          );
+        })()}
+      {phase === "identify" &&
+        (showAll || !found?.focus) &&
         found?.parts.map((p, i) => {
           const at = onSnap(p.x, p.y);
           if (!at) return null;
@@ -1473,6 +1515,17 @@ export default function CallPage() {
                   {foundMode === "parts" && <div className="mb-1 text-xs font-extrabold uppercase tracking-[0.25em] text-[#FFB38A]">🔩 Your parts</div>}
                   <h1 className="text-3xl font-black leading-none">{found.name}</h1>
                   <p className="mt-1.5 text-white/70">{found.what}</p>
+                  {found.focus && (
+                    <p className="mt-3 text-lg font-extrabold leading-snug">
+                      👉 Look here first: <span className="text-[#FF8A3D]">{found.focus.label}</span>
+                      <span className="block text-base font-semibold text-white/70">{found.focus.why}</span>
+                    </p>
+                  )}
+                  {found.parts.length > 1 && (
+                    <button onClick={() => setShowAll((v) => !v)} className="mt-2 text-sm font-bold text-white/50 underline">
+                      {showAll ? "Just the main thing" : `Show all ${found.parts.length} parts`}
+                    </button>
+                  )}
                 </div>
                 <button onClick={() => speak(found.say)} className="grid h-12 w-12 flex-none place-items-center rounded-full bg-white/10 text-xl" aria-label="Say it again">
                   🔊
@@ -1513,7 +1566,7 @@ export default function CallPage() {
                   {foundMode === "parts" ? "🔁 Put it back together" : "📞 Fix it with Ray"}
                 </button>
               )}
-              {foundMode === "parts" && found.parts.length > 0 && (
+              {foundMode === "parts" && showAll && found.parts.length > 0 && (
                 <ul className="mt-4 space-y-1.5 text-sm">
                   {found.parts.map((p, i) => (
                     <li key={i} className="flex gap-2" onClick={() => speak(`${p.label}. ${p.what}`)}>

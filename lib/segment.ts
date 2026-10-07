@@ -75,3 +75,20 @@ export async function segmentMasks(frame: string): Promise<Part[]> {
 Output a JSON list of segmentation masks where each entry contains the 2D bounding box in the key "box_2d" ([ymin,xmin,ymax,xmax], 0-1000), the segmentation mask in key "mask", and the text label in the key "label". Use ONLY labels from the list: ${LABELS.join(", ")}. Each label at most once. Skip parts that are not visible.`;
   return normalize(parse(await gemini(MASK_MODEL, frame, prompt, false)), true);
 }
+
+/**
+ * Find named things in a frame (names chosen by the coach, e.g. "data label"), for pinning exactly where they are.
+ * Returns the box center for each name Gemini can see.
+ */
+export async function locate(frame: string, names: string[]): Promise<{ label: string; x: number; y: number }[]> {
+  const prompt = `Find these in the image if they are visible: ${names.map((n) => `"${n}"`).join(", ")}.
+JSON list of {"box_2d":[ymin,xmin,ymax,xmax] 0-1000, "label"} using exactly those names. Tight boxes. Skip what is not visible.`;
+  const out: { label: string; x: number; y: number }[] = [];
+  for (const it of parse(await gemini(BOX_MODEL, frame, prompt, true))) {
+    const b = it.box_2d;
+    if (!it.label || !b || b.length !== 4) continue;
+    const [ymin, xmin, ymax, xmax] = b.map((v) => Math.min(Math.max(v / 1000, 0), 1));
+    out.push({ label: it.label, x: (xmin + xmax) / 2, y: (ymin + ymax) / 2 });
+  }
+  return out;
+}
