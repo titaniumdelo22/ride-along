@@ -177,6 +177,7 @@ export default function CallPage() {
   const redoneRef = useRef<string[]>([]);
   const surprisesRef = useRef<string[]>([]);
   const missingRef = useRef<string[]>([]); // tools they left unchecked on the gear screen
+  const [unplugged, setUnplugged] = useState(false); // confirmed up front, so the unplug step is skipped
   const shotsRef = useRef<string[]>([]); // photos Ray takes as each step starts, for putting it back together later
   const fileRef = useRef<HTMLInputElement>(null);
   const clearedRef = useRef<Set<number>>(new Set());
@@ -750,6 +751,17 @@ export default function CallPage() {
     const first = capture();
     shotsRef.current = first ? [first] : [];
     setSees(null);
+    // Already confirmed it's unplugged: skip the unplug step(s) and tell Ray.
+    let steps = plan.steps;
+    if (unplugged) {
+      const keep = plan.steps.filter((s) => !/unplug/i.test(`${s.title} ${s.instruction}`));
+      if (keep.length && keep.length < plan.steps.length) {
+        steps = keep;
+        setPlan({ ...plan, steps: keep });
+        setCurrent(Math.min(current, keep.length - 1));
+      }
+      talkRef.current = [...talkRef.current, { who: "you" as const, text: "It's already unplugged." }];
+    }
     // Tools they left unchecked (only if they checked any; no checks means they didn't say).
     const missing = gear.size ? plan.tools.filter((_, i) => !gear.has(i)) : [];
     missingRef.current = missing.map((t) => t.name);
@@ -758,8 +770,9 @@ export default function CallPage() {
     award(10 * plan.tools.length, ["🎒 Geared up"]);
     const safety = plan.hazards?.length ? `Safety first: ${plan.hazards.map((h) => h.text).join(" ")} ` : "";
     const tools = mustMissing.length ? `Heads up, you'll need ${mustMissing.join(" and ")} for part of this. I'll tell you when. ` : "";
-    speak(`${safety}${tools}${current > 0 ? `Picking up at step ${current + 1}` : "Step one"}: ${plan.steps[current].instruction}`);
-  }, [plan, current, award, speak, capture, gear]);
+    const at = Math.min(current, steps.length - 1);
+    speak(`${safety}${unplugged ? "Good, it's unplugged. " : ""}${tools}${at > 0 ? `Picking up at step ${at + 1}` : "Step one"}: ${steps[at].instruction}`);
+  }, [plan, current, award, speak, capture, gear, unplugged]);
 
   // ── Watch loop ────────────────────────────────────────────────────────────
   const tick = useCallback(
@@ -1151,6 +1164,7 @@ export default function CallPage() {
         return;
       }
       if (phase === "loadout") {
+        if (/unplugged|it's off|its off|power is off/i.test(text)) return setUnplugged(true);
         if (said(text, SAY.go)) return plan ? go() : speak("Almost. I'm still mapping it out.");
         return;
       }
@@ -1788,6 +1802,12 @@ export default function CallPage() {
           {plan?.hazards?.length ? (
             <div className="mt-5 border-y border-hazard/40 py-3">
               <div className="font-mono text-[11px] font-bold uppercase tracking-[0.2em] text-hazard">⚠ Safety on this job</div>
+              <button
+                onClick={() => setUnplugged((u) => !u)}
+                className={`mt-2 flex w-full items-center justify-between px-3 py-2.5 font-display text-lg uppercase tracking-wide ${unplugged ? "bg-[#22C55E] text-ink" : "border-2 border-hazard text-bone"}`}
+              >
+                ⚡ It&apos;s unplugged <span>{unplugged ? "✓" : "tap to confirm"}</span>
+              </button>
               <ul className="mt-2 space-y-1.5">
                 {plan.hazards.map((h, i) => (
                   <li key={i} className="flex gap-2 text-sm font-semibold">
