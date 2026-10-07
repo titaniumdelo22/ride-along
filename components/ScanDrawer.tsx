@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { PARTS, byLabel } from "@/lib/parts";
+import { unlockAudio } from "@/lib/voice";
 import type { FixPlan, Intake } from "@/lib/fix";
 
 export type FixPhase = "idle" | "problem" | "shots" | "planning" | "steps";
@@ -44,7 +45,7 @@ export default function ScanDrawer(p: Props) {
   useEffect(() => { if (p.mode === "fix" && !p.plan) inputRef.current?.focus(); }, [p.mode, p.plan]);
 
   return (
-    <div className="absolute inset-x-0 bottom-0 rounded-t-3xl bg-[#121212]/95 backdrop-blur text-white shadow-[0_-10px_40px_rgba(0,0,0,.6)]">
+    <div onPointerDown={unlockAudio} className="absolute inset-x-0 bottom-0 rounded-t-3xl bg-[#121212]/95 backdrop-blur text-white shadow-[0_-10px_40px_rgba(0,0,0,.6)]">
       {/* tabs */}
       <div className="flex gap-1 p-2 pt-3">
         {(["parts", "tour", "fix"] as Mode[]).map((m) => (
@@ -86,7 +87,7 @@ export default function ScanDrawer(p: Props) {
 
       {p.mode === "fix" && p.fixPhase === "idle" && (
         <div className="px-3 pb-6">
-          <div className="text-sm text-white/75">Ray will ask what's wrong, then tell you exactly what to show the camera, one shot at a time, before making a plan.</div>
+          <div className="text-sm text-white/75">Tell Ray what you want: fix a problem, check it, or clean it. Ray then asks for the exact views it needs, one at a time, and compares them to how this unit should look.</div>
           <button onClick={p.onStartFix} className="mt-3 w-full rounded-full bg-[#FF6B1A] py-3 text-base font-black text-black">Start a fix</button>
         </div>
       )}
@@ -94,9 +95,9 @@ export default function ScanDrawer(p: Props) {
       {p.mode === "fix" && p.fixPhase === "problem" && (
         <form className="px-3 pb-6" onSubmit={(e) => { e.preventDefault(); if (problem.trim()) p.onProblem(problem.trim()); }}>
           <div className="text-xs text-white/60">Step 1 · Tell Ray</div>
-          <div className="mt-1 text-lg font-bold">What's going on?</div>
+          <div className="mt-1 text-lg font-bold">What do you want to do?</div>
           <div className="mt-2 flex gap-2">
-            <input ref={inputRef} value={problem} onChange={(e) => setProblem(e.target.value)} placeholder="e.g. the cold light is off and the water is warm"
+            <input ref={inputRef} value={problem} onChange={(e) => setProblem(e.target.value)} placeholder="e.g. it stopped working, or: I want to clean this up"
               className="flex-1 rounded-full bg-white/10 px-4 py-3 text-sm outline-none placeholder:text-white/40" />
             <button type="button" onClick={p.onMic} className={`rounded-full px-4 text-lg ${p.listening ? "bg-red-500" : "bg-white/10"}`}>🎙️</button>
           </div>
@@ -104,7 +105,7 @@ export default function ScanDrawer(p: Props) {
             {p.busy ? "Ray is thinking…" : "Next"}
           </button>
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {["Nothing turns on", "COLD light is off, water is warm", "No hot water", "Leaking"].map((q) => (
+            {["It stopped working", "COLD light is off", "Check all the wiring", "I want to clean this up"].map((q) => (
               <button type="button" key={q} onClick={() => setProblem(q)} className="rounded-full bg-white/10 px-3 py-1 text-xs">{q}</button>
             ))}
           </div>

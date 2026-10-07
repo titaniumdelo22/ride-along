@@ -5,7 +5,7 @@ import ConditionBanner from "@/components/ConditionBanner";
 import GlassesOverlay, { type OverlayPart, type OverlayAnomaly } from "@/components/GlassesOverlay";
 import { PARTS, byLabel } from "@/lib/parts";
 import { MotionTracker } from "@/lib/motion";
-import { speak as sayAloud, isSpeaking, stopSpeaking } from "@/lib/voice";
+import { speak as sayAloud, isSpeaking, stopSpeaking, unlockAudio } from "@/lib/voice";
 import ScanDrawer, { type Mode, type FixPhase } from "@/components/ScanDrawer";
 import type { FixPlan, FixWatch, Replan, Intake } from "@/lib/fix";
 
@@ -464,7 +464,7 @@ export default function GlassesPage() {
         lastSay={lastSay} listening={listening} onMic={onMic} />
 
       {needTap && (
-        <button onClick={async () => { if (!(await startCamera())) setErr("Camera blocked. In Safari: aA menu → Website Settings → Camera → Allow, then reload."); }}
+        <button onClick={async () => { unlockAudio(); if (!(await startCamera())) setErr("Camera blocked. In Safari: aA menu → Website Settings → Camera → Allow, then reload."); }}
           className="absolute inset-x-8 top-1/2 -translate-y-1/2 rounded-2xl bg-[#FF6B1A] px-6 py-5 text-xl font-black text-black shadow-xl">
           Tap to start the camera
         </button>
