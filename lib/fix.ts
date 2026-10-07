@@ -51,7 +51,7 @@ export const FixWatch = z.object({
   see: z.string().describe("One short sentence: what is in the camera right now, which parts, how close"),
   stepDone: z.boolean().describe("True only if the camera clearly shows the current step's check is met"),
   say: z.string().nullable().describe("One or two short sentences to say now, or null to stay quiet. Be specific: name the part and what correct looks like."),
-  aim: z.string().nullable().describe("If you need a different view, exactly where to point the camera and how close, else null"),
+  aim: z.string().nullable().describe("If you need a different view: name the PART and where it is on the machine and how close, e.g. 'Point the phone at the black relay box on the side of the compressor, about 15 cm away'. Never a bare direction like up/left. Null if the view is fine."),
   anomalies: z.array(Anomaly).describe("Anything that looks wrong in THIS frame: a wire off a screw, a connector hanging, a part missing or damaged. Empty if everything visible looks normal. Never guess."),
   safety: z.string().nullable().describe("Urgent safety warning if something unsafe is happening, else null"),
 });

@@ -54,6 +54,8 @@ export default function GlassesPage() {
   const photosRef = useRef<string[]>([]);
   const notesRef = useRef<string[]>([]);
   const askedRef = useRef<string[]>([]); // survey areas already photographed
+  const partsRef = useRef<OverlayPart[]>([]);
+  const missRef = useRef(0);
   const [shots, setShots] = useState(0);
   const [listening, setListening] = useState(false);
   const modeRef = useRef(mode); modeRef.current = mode;
@@ -207,6 +209,7 @@ export default function GlassesPage() {
       return { ...b, mask: m.mask };
     });
     setParts(out);
+    partsRef.current = out;
     setSeen((s) => {
       const n = new Set(s);
       out.forEach((p) => n.add(p.label));
@@ -362,7 +365,14 @@ export default function GlassesPage() {
             continue;
           }
           if (w.safety) { setLastSay(w.safety); speak(w.safety); continue; }
-          const line = w.say ?? (w.anomalies.length ? `I see ${w.anomalies.map((an) => an.issue).join(", and ")}.` : null) ?? w.aim;
+          const stepPartsNow = pl.steps[idx]?.parts ?? [];
+          const visibleNow = new Set(partsRef.current.map((pp) => pp.label));
+          const targetMissing = stepPartsNow.length > 0 && !stepPartsNow.some((l) => visibleNow.has(l));
+          missRef.current = targetMissing ? missRef.current + 1 : 0;
+          const aimLine = w.aim && /\b(at|the)\b/i.test(w.aim) ? w.aim : null; // only part-named directions
+          const reAsk = missRef.current >= 2 ? `Point the phone at the ${stepPartsNow[0]}. ${pl.steps[idx].instruction}` : null;
+          if (reAsk) missRef.current = 0;
+          const line = w.say ?? (w.anomalies.length ? `I see ${w.anomalies.map((an) => an.issue).join(", and ")}.` : null) ?? reAsk ?? aimLine;
           if (line) { setLastSay(line); speak(line); }
           if (w.stepDone && stepRef.current === idx && idx < pl.steps.length - 1) setStepIndex(idx + 1);
         } catch { /* try again next tick */ } finally { setLooking(false); }
