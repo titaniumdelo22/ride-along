@@ -2,6 +2,7 @@
 import { useEffect, useRef } from "react";
 
 export type OverlayPart = { label: string; color: string; box: [number, number, number, number]; mask?: string | null };
+export type OverlayAnomaly = { part: string; issue: string; box: [number, number, number, number] };
 
 type Props = {
   parts: OverlayPart[];
@@ -10,6 +11,10 @@ type Props = {
   /** Shift to apply while waiting for the next detection, in fractions of the frame (camera moved since capture). */
   drift: { dx: number; dy: number };
   selected?: string | null;
+  /** When set, only these labels are drawn bright; the rest are dimmed. */
+  focus?: Set<string> | null;
+  /** Problems the coach spotted in the current view, drawn in red. */
+  anomalies?: OverlayAnomaly[];
   onTap?: (label: string | null) => void;
 };
 
@@ -19,7 +24,7 @@ function hexA(hex: string, a: number) {
 }
 
 /** Canvas painted over the video: colored masks (or boxes) + label pills. */
-export default function GlassesOverlay({ parts, view, drift, selected, onTap }: Props) {
+export default function GlassesOverlay({ parts, view, drift, selected, focus, anomalies = [], onTap }: Props) {
   const ref = useRef<HTMLCanvasElement>(null);
   const imgs = useRef<Map<string, HTMLImageElement>>(new Map());
   const tinted = useRef<Map<string, HTMLCanvasElement>>(new Map());
@@ -59,7 +64,7 @@ export default function GlassesOverlay({ parts, view, drift, selected, onTap }: 
         const [x0, y0] = map(p.box[0], p.box[1]);
         const [x1, y1] = map(p.box[2], p.box[3]);
         const w = x1 - x0, h = y1 - y0;
-        const dim = selected && selected !== p.label;
+        const dim = (selected && selected !== p.label) || (focus && focus.size > 0 && !focus.has(p.label));
         const alpha = dim ? 0.12 : 0.42;
         const im = p.mask ? imgs.current.get(p.mask) : null;
         if (im && im.complete && im.naturalWidth > 0) {
@@ -109,11 +114,33 @@ export default function GlassesOverlay({ parts, view, drift, selected, onTap }: 
         ctx.fillStyle = "#000";
         ctx.fillText(text, lx + 9, ly + 15.5);
       }
-      if (pending) raf = requestAnimationFrame(draw);
+      // anomalies: red pulsing frame + issue tag
+      const pulse = 0.55 + 0.45 * Math.sin(Date.now() / 250);
+      for (const a of anomalies) {
+        const [x0, y0] = map(a.box[0], a.box[1]);
+        const [x1, y1] = map(a.box[2], a.box[3]);
+        ctx.strokeStyle = `rgba(255,59,48,${0.5 + 0.5 * pulse})`;
+        ctx.lineWidth = 3;
+        ctx.setLineDash([8, 6]);
+        ctx.beginPath(); ctx.roundRect(x0, y0, x1 - x0, y1 - y0, 8); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = `rgba(255,59,48,${0.12 + 0.1 * pulse})`;
+        ctx.beginPath(); ctx.roundRect(x0, y0, x1 - x0, y1 - y0, 8); ctx.fill();
+        const text = `⚠ ${a.issue}`;
+        ctx.font = "700 13px -apple-system, system-ui, sans-serif";
+        const tw = Math.min(ctx.measureText(text).width + 18, view.w - 8);
+        const lx = Math.max(4, Math.min(x0, view.w - tw - 4));
+        const ly = y1 + 6 > view.h - 26 ? y0 - 26 : y1 + 6;
+        ctx.fillStyle = "#FF3B30";
+        ctx.beginPath(); ctx.roundRect(lx, ly, tw, 22, 11); ctx.fill();
+        ctx.fillStyle = "#fff";
+        ctx.fillText(text, lx + 9, ly + 15.5, tw - 18);
+      }
+      if (pending || anomalies.length) raf = requestAnimationFrame(draw);
     };
     draw();
     return () => cancelAnimationFrame(raf);
-  }, [parts, view, drift, selected]);
+  }, [parts, view, drift, selected, focus, anomalies]);
 
   return (
     <canvas

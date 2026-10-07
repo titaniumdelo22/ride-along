@@ -1,11 +1,11 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import GlassesOverlay, { type OverlayPart } from "@/components/GlassesOverlay";
+import GlassesOverlay, { type OverlayPart, type OverlayAnomaly } from "@/components/GlassesOverlay";
 import { PARTS, byLabel } from "@/lib/parts";
 import { MotionTracker } from "@/lib/motion";
 import ScanDrawer, { type Mode } from "@/components/ScanDrawer";
-import type { FixPlan } from "@/lib/fix";
+import type { FixPlan, FixWatch } from "@/lib/fix";
 
 /**
  * Glasses view: live camera, every known part tinted in its color and labeled.
@@ -38,6 +38,11 @@ export default function GlassesPage() {
   const [stepIndex, setStepIndex] = useState(0);
   const [planning, setPlanning] = useState(false);
   const [lastSay, setLastSay] = useState<string | null>(null);
+  const [problem, setProblem] = useState("");
+  const problemRef = useRef(problem); problemRef.current = problem;
+  const historyRef = useRef<string[]>([]);
+  const [anomalies, setAnomalies] = useState<OverlayAnomaly[]>([]);
+  const [looking, setLooking] = useState(false);
   const [listening, setListening] = useState(false);
   const modeRef = useRef(mode); modeRef.current = mode;
   const planRef = useRef(plan); planRef.current = plan;
@@ -211,7 +216,7 @@ export default function GlassesPage() {
     const loop = async () => {
       while (!stop) {
         if (pausedRef.current) { await new Promise((r) => setTimeout(r, 200)); continue; }
-        const frame = grab(480, 0.6);
+        const frame = grab(640, 0.65);
         if (!frame) { await new Promise((r) => setTimeout(r, 200)); continue; }
         pendingTotal.current = { ...(tracker.current?.total ?? { x: 0, y: 0 }) };
         const t0 = Date.now();
@@ -289,34 +294,42 @@ export default function GlassesPage() {
     if (mode !== "fix" || !plan) return;
     const st = plan.steps[stepIndex];
     if (!st) return;
-    setLastSay(null);
+    setLastSay(null); setAnomalies([]);
     speak(stepIndex === 0 ? `${plan.intro} ${plan.diagnosis} First: ${st.instruction}` : `${st.title}. ${st.instruction}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, plan, stepIndex]);
 
-  // Fix: watch the camera every ~3 s and move on when the step is clearly done
+  // Fix: every look, the newest frame goes to the smart model with the whole story so far.
+  // It can mark anomalies on screen, change the next steps, ask for a closer view, or mark the step done.
   useEffect(() => {
     let stop = false;
     const loop = async () => {
       while (!stop) {
-        await new Promise((r) => setTimeout(r, 3000));
+        await new Promise((r) => setTimeout(r, 1200));
         const pl = planRef.current;
         if (modeRef.current !== "fix" || !pl || pausedRef.current) continue;
         if (typeof window !== "undefined" && window.speechSynthesis?.speaking && !userSaidRef.current) continue;
-        const frame = grab(640, 0.6);
+        const frame = grab(768, 0.7);
         if (!frame) continue;
         const idx = stepRef.current;
         const said = userSaidRef.current; userSaidRef.current = null;
+        setLooking(true);
         try {
-          const res = await fetch("/api/fix", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: "watch", frame, step: pl.steps[idx], userSaid: said }) });
-          const w = (await res.json()) as { stepDone?: boolean; say?: string | null; safety?: string | null; error?: string };
+          const res = await fetch("/api/fix", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: "watch", frame, problem: problemRef.current, plan: pl, current: idx, history: historyRef.current, userSaid: said }) });
+          const w = (await res.json()) as FixWatch & { error?: string };
           if (w.error) continue;
-          if (w.safety) { setLastSay(w.safety); speak(w.safety); continue; }
-          if (w.say) { setLastSay(w.say); speak(w.say); }
-          if (w.stepDone && stepRef.current === idx && idx < pl.steps.length - 1) {
-            setStepIndex(idx + 1);
+          historyRef.current = [...historyRef.current, w.see].slice(-6);
+          setAnomalies(w.anomalies.map((an) => ({ part: an.part, issue: an.issue, box: [an.box_2d[1] / 1000, an.box_2d[0] / 1000, an.box_2d[3] / 1000, an.box_2d[2] / 1000] as [number, number, number, number] })));
+          if (w.replaceRemainingSteps && w.replaceRemainingSteps.length && stepRef.current === idx) {
+            const next = { ...pl, steps: [...pl.steps.slice(0, idx + 1), ...w.replaceRemainingSteps] };
+            setPlan(next);
+            setLastSay("Plan updated from what I can see.");
           }
-        } catch { /* try again next tick */ }
+          if (w.safety) { setLastSay(w.safety); speak(w.safety); continue; }
+          const line = w.say ?? (w.anomalies.length ? `I see ${w.anomalies.map((an) => an.issue).join(", and ")}.` : null) ?? w.aim;
+          if (line) { setLastSay(line); speak(line); }
+          if (w.stepDone && stepRef.current === idx && idx < pl.steps.length - 1) setStepIndex(idx + 1);
+        } catch { /* try again next tick */ } finally { setLooking(false); }
       }
     };
     loop();
@@ -325,7 +338,8 @@ export default function GlassesPage() {
   }, [grab]);
 
   const onPlan = async (problem: string) => {
-    if (!problem) { setPlan(null); setStepIndex(0); setSelected(null); return; }
+    if (!problem) { setPlan(null); setStepIndex(0); setSelected(null); setAnomalies([]); historyRef.current = []; return; }
+    setProblem(problem); historyRef.current = []; setAnomalies([]);
     setPlanning(true);
     setErr(null);
     try {
@@ -370,21 +384,21 @@ export default function GlassesPage() {
 
   // What gets drawn: in Fix mode only the current step's parts; with a selection only that part; otherwise everything.
   const stepParts = mode === "fix" && plan ? new Set(plan.steps[stepIndex]?.parts ?? []) : null;
-  const visibleParts = stepParts && stepParts.size > 0 ? parts.filter((p) => stepParts.has(p.label)) : selected ? parts.filter((p) => p.label === selected) : parts;
+  const visibleParts = selected && mode !== "fix" ? parts.filter((p) => p.label === selected) : parts;
   const inView = new Set(parts.map((p) => p.label));
 
   return (
     <main className="h-dvh w-screen bg-black text-white overflow-hidden relative select-none">
       <div ref={wrapRef} className="absolute inset-0">
         <video ref={videoRef} playsInline muted className="h-full w-full object-cover" />
-        {view.w > 0 && <GlassesOverlay parts={visibleParts} view={view} drift={drift} selected={selected} onTap={onTap} />}
+        {view.w > 0 && <GlassesOverlay parts={visibleParts} view={view} drift={drift} selected={mode === "fix" ? null : selected} focus={stepParts} anomalies={mode === "fix" ? anomalies : []} onTap={onTap} />}
       </div>
 
       {/* top bar */}
       <div className="absolute top-0 inset-x-0 p-3 flex items-center gap-2 bg-gradient-to-b from-black/70 to-transparent">
         <Link href="/" className="text-lg font-extrabold tracking-tight">ride<span className="text-[#FF6B1A]">along</span></Link>
         <span className="ml-2 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold backdrop-blur">LIVE SCAN</span>
-        <span className="ml-auto text-xs text-white/80">{status}</span>
+        <span className="ml-auto text-xs text-white/80">{looking ? "Ray is looking…" : status}</span>
       </div>
 
       {/* small controls, top right under the status */}
