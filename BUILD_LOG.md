@@ -1,6 +1,6 @@
 # Ride Along: build log
 
-Musa Labs Hackathon, SF Tech Week, Oct 7 2026. Team: Titanium Delo. Built 12:30 to 4:00 PM.
+Musa Labs Hackathon, SF Tech Week, Oct 7 2026. Team: Titanium Delo and Philip Mocanu. Built 12:30 to 4:00 PM.
 Every line of code was written by AI (Claude Code, Claude Opus 5.5). Titanium directed; the model wrote.
 
 ## Tools
@@ -8,6 +8,7 @@ Every line of code was written by AI (Claude Code, Claude Opus 5.5). Titanium di
 - Claude API (claude-opus-5-5) inside the app: plans the job from the camera and the label, then watches the live camera.
 - Next.js 16, React 19, Tailwind, @anthropic-ai/sdk, zod. Browser camera (getUserMedia), browser voice in and out (Web Speech).
 - cloudflared: a secure https link so a phone's camera can use the laptop's server.
+- Gemini (gemini-3.1-flash-lite), Glasses view only (built by Philip): fast boxes around each part, with a small on-phone motion tracker that keeps the labels glued to the parts between detections. See README.md.
 
 ## The prompts that built it (Titanium's words, in order)
 1. "A visual / audio teacher like FaceTiming a pro. We're shown a problem for our use case (a water dispenser) and the AI agent looks at it live with us and visually and audibly walks us through it. For new mechanics, HVAC technicians, plumbers. Scan the serial number. We need a demo in 3 hours."
