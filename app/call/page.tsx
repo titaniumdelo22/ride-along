@@ -768,7 +768,7 @@ export default function CallPage() {
       if (!userSaid) {
         if (inFlight.current >= MAX_LOOKS) return;
         if (Date.now() - voiceAt.current < 2500) return; // they're talking: wait for what they say
-        if (movingRef.current) return; // wait until they hold still
+
       }
       const seq = ++seqRef.current;
       const at = current;
@@ -786,7 +786,7 @@ export default function CallPage() {
         appliedRef.current = Math.max(appliedRef.current, seq);
         const sameStep = currentRef.current === at;
         setSees(w.see);
-        if (!movingRef.current) setPoint(w.point);
+        if (w.point) setPoint(w.point);
         setAim(w.aim);
         if (w.safety) {
           setFlash("danger");
@@ -865,14 +865,13 @@ export default function CallPage() {
         sum += y;
         if (prev) diff += Math.abs(y - prev[k]);
       }
-      if (prev && diff / n > 12) lastMove = Date.now();
+      if (prev && diff / n > 26) lastMove = Date.now(); // real movement, not hand shake
       prev = now;
       const moving = Date.now() - lastMove < 500;
       const dark = sum / n < 35;
       if (moving !== movingRef.current) {
         movingRef.current = moving;
-        if (moving) setPoint(null);
-        else tickRef.current(null);
+        if (!moving) tickRef.current(null);
       }
       setCam((x) => (x.dark === dark && x.moving === moving ? x : { dark, moving }));
     }, 250);
