@@ -35,49 +35,66 @@ export default function GlassesPage() {
   pausedRef.current = paused;
 
   // camera
+  const [needTap, setNeedTap] = useState(false);
+  const streamRef = useRef<MediaStream | null>(null);
+  const startCamera = useCallback(async () => {
+    setErr(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      });
+      streamRef.current = stream;
+      const v = videoRef.current!;
+      v.srcObject = stream;
+      await v.play();
+      setNeedTap(false);
+      setStatus("Looking…");
+      return true;
+    } catch (e) {
+      console.error(e);
+      return false;
+    }
+  }, []);
+
   useEffect(() => {
-    let stream: MediaStream | null = null;
     (async () => {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
-          audio: false,
-        });
+      if (await startCamera()) return;
+      const isPhone = /iPhone|iPad|Android/i.test(navigator.userAgent) || navigator.maxTouchPoints > 1;
+      if (isPhone) {
+        // iPhone Safari sometimes wants a tap before it hands over the camera. Ask for one instead of guessing.
+        setNeedTap(true);
+        setStatus("Camera needs a tap");
+        return;
+      }
+      // Desktop with no camera: run on a still demo photo so the whole pipeline still works.
+      const still = new URLSearchParams(window.location.search).get("still") || "/demo/cooler.jpg";
+      const im = new Image();
+      im.onload = async () => {
+        const c = document.createElement("canvas");
+        c.width = im.naturalWidth; c.height = im.naturalHeight;
+        const ctx = c.getContext("2d")!;
+        const t0 = Date.now();
+        const paint = () => {
+          const t = (Date.now() - t0) / 1000;
+          ctx.fillStyle = "#111"; ctx.fillRect(0, 0, c.width, c.height);
+          ctx.drawImage(im, Math.sin(t / 2) * c.width * 0.06, Math.cos(t / 3) * c.height * 0.03);
+        };
+        paint();
+        const iv = setInterval(paint, 33);
+        const stream = c.captureStream(30);
+        streamRef.current = stream;
         const v = videoRef.current!;
         v.srcObject = stream;
         await v.play();
-        setStatus("Looking…");
-      } catch (e) {
-        console.error(e);
-        // No camera (desktop browser, or blocked): run on a still demo photo so the whole pipeline still works.
-        const still = new URLSearchParams(window.location.search).get("still") || "/demo/cooler.jpg";
-        const im = new Image();
-        im.onload = async () => {
-          const c = document.createElement("canvas");
-          c.width = im.naturalWidth; c.height = im.naturalHeight;
-          const ctx = c.getContext("2d")!;
-          // Slowly slide the photo so the tracker has motion to follow (simulates a handheld pan).
-          const t0 = Date.now();
-          const paint = () => {
-            const t = (Date.now() - t0) / 1000;
-            ctx.fillStyle = "#111"; ctx.fillRect(0, 0, c.width, c.height);
-            ctx.drawImage(im, Math.sin(t / 2) * c.width * 0.06, Math.cos(t / 3) * c.height * 0.03);
-          };
-          paint();
-          const iv = setInterval(paint, 33);
-          stream = c.captureStream(30);
-          const v = videoRef.current!;
-          v.srcObject = stream;
-          await v.play();
-          setStatus("Demo photo (no camera)");
-          v.addEventListener("emptied", () => clearInterval(iv), { once: true });
-        };
-        im.onerror = () => setErr("Camera blocked. Allow camera access and reload. On a phone this page must be opened over https.");
-        im.src = still;
-      }
+        setStatus("Demo photo (no camera)");
+        v.addEventListener("emptied", () => clearInterval(iv), { once: true });
+      };
+      im.onerror = () => setErr("Camera blocked. Allow camera access and reload.");
+      im.src = still;
     })();
-    return () => stream?.getTracks().forEach((t) => t.stop());
-  }, []);
+    return () => streamRef.current?.getTracks().forEach((t) => t.stop());
+  }, [startCamera]);
 
   // size
   useEffect(() => {
@@ -260,7 +277,7 @@ export default function GlassesPage() {
       {/* top bar */}
       <div className="absolute top-0 inset-x-0 p-3 flex items-center gap-2 bg-gradient-to-b from-black/70 to-transparent">
         <Link href="/" className="text-lg font-extrabold tracking-tight">ride<span className="text-[#FF6B1A]">along</span></Link>
-        <span className="ml-2 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold backdrop-blur">GLASSES</span>
+        <span className="ml-2 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold backdrop-blur">LIVE SCAN</span>
         <span className="ml-auto text-xs text-white/80">{status}</span>
       </div>
 
@@ -284,6 +301,12 @@ export default function GlassesPage() {
         <span className="ml-auto text-white/60 tabular-nums">boxes {ms.box ? `${(ms.box / 1000).toFixed(1)}s` : "–"} · outlines {ms.mask ? `${(ms.mask / 1000).toFixed(1)}s` : "–"}</span>
       </div>
 
+      {needTap && (
+        <button onClick={async () => { if (!(await startCamera())) setErr("Camera blocked. In Safari: aA menu → Website Settings → Camera → Allow, then reload."); }}
+          className="absolute inset-x-8 top-1/2 -translate-y-1/2 rounded-2xl bg-[#FF6B1A] px-6 py-5 text-xl font-black text-black shadow-xl">
+          Tap to start the camera
+        </button>
+      )}
       {err && <div className="absolute left-3 right-3 bottom-20 rounded-xl bg-red-600/90 p-3 text-sm">{err}</div>}
       {selected && (
         <div className="absolute left-3 right-24 bottom-20 rounded-xl bg-black/70 p-3 text-sm backdrop-blur">
